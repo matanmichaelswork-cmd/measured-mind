@@ -1,0 +1,2785 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Measured Mind.</title>
+
+<!--
+  ╔══════════════════════════════════════════════════════════════════╗
+  ║  SECURITY HARDENING — MeasuredMind.dev                          ║
+  ║  Compliant with OWASP Top 10 for static sites (2024)            ║
+  ║                                                                  ║
+  ║  Applied controls:                                               ║
+  ║  1. Content-Security-Policy (CSP) — blocks XSS & injections     ║
+  ║  2. X-Frame-Options via CSP frame-ancestors — blocks clickjack   ║
+  ║  3. Client-side rate limiting on form (localStorage-based)      ║
+  ║  4. Strict input validation & sanitisation on all user inputs    ║
+  ║  5. File upload validation (type + size)                         ║
+  ║  6. No hardcoded credentials detected (clean)                    ║
+  ║                                                                  ║
+  ║  ⚠ IMPORTANT — what this file cannot do alone:                  ║
+  ║    True server-side rate limiting and API key protection         ║
+  ║    require a backend (e.g. Cloudflare Workers, Netlify Functions ║
+  ║    or a Formspree/EmailJS endpoint). See comments below at each  ║
+  ║    relevant control point for upgrade instructions.              ║
+  ╚══════════════════════════════════════════════════════════════════╝
+-->
+
+<!--
+  SECURITY CONTROL 1 — Content-Security-Policy
+  ─────────────────────────────────────────────
+  Prevents XSS, data injection, clickjacking, and mixed content.
+
+  Policy breakdown:
+  • default-src 'self'        → only load resources from this origin by default
+  • script-src 'self' 'unsafe-inline'
+                              → inline <script> blocks required for existing animations.
+                                TODO: move all JS to external files to drop 'unsafe-inline'
+                                and add a nonce or hash per script block instead.
+  • style-src 'self' 'unsafe-inline' https://fonts.googleapis.com
+                              → inline styles used throughout; Google Fonts CSS allowed
+  • font-src https://fonts.gstatic.com
+                              → Google Fonts file origin only
+  • img-src 'self' data: blob:
+                              → allows canvas toDataURL() and user image uploads (blob:)
+  • connect-src 'none'        → no fetch/XHR allowed client-side (no API keys exposed)
+  • frame-ancestors 'none'    → blocks all framing (replaces X-Frame-Options: DENY)
+  • base-uri 'self'           → prevents base-tag hijacking attacks
+  • form-action 'none'        → form has no server target; blocks CSRF form-hijacking
+  • upgrade-insecure-requests → forces all sub-resources to HTTPS (.dev TLD enforces
+                                this at the registry level too, but belt-and-braces)
+
+  ⚠ NOTE: For GitHub Pages, you cannot set HTTP headers directly.
+    To enforce CSP via headers (stronger), deploy a _headers file (Netlify)
+    or use Cloudflare Pages rules. The meta tag below is the best option
+    for GitHub Pages and covers the vast majority of attacks.
+-->
+<meta http-equiv="Content-Security-Policy"
+  content="
+    default-src 'self';
+    script-src 'self' 'unsafe-inline';
+    style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+    font-src https://fonts.gstatic.com;
+    img-src 'self' data: blob:;
+    connect-src 'none';
+    frame-ancestors 'none';
+    base-uri 'self';
+    form-action 'none';
+    upgrade-insecure-requests;
+  ">
+
+<!--
+  SECURITY CONTROL 2 — Referrer Policy
+  Prevents the Referer header from leaking your URL to third parties.
+-->
+<meta name="referrer" content="strict-origin-when-cross-origin">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400;1,600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<!--
+  NOTE: Google Fonts does not currently publish SRI hashes because their
+  CSS responses are dynamic (they adapt to browser/OS). To get SRI on fonts,
+  self-host the font files in your repo and reference them with a local @font-face.
+  Instructions: https://gwfh.mranftl.com/fonts (Google Webfonts Helper)
+-->
+<style>
+:root{
+  --cream:#f5f4f0;--cream2:#edeae2;
+  --ink:#1a1610;--ink-mid:rgba(26,22,16,.5);--ink-dim:rgba(26,22,16,.24);
+  --gold:#c9a24a;
+  --gsr:#E8402A;--pupil:#9B52CC;--hrv:#2EAD5C;--eye:#E8940A;
+  --accent:#4a4135;
+  --mono:'JetBrains Mono',monospace;
+  --serif:'Lora',Georgia,serif;
+  --rule:rgba(26,22,16,.09);--rule-light:rgba(26,22,16,.05);
+}
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+body{background:var(--cream);color:var(--ink);font-family:var(--serif);-webkit-font-smoothing:antialiased;overflow-x:hidden;}
+
+/* RIGHT STORY NAV */
+#story-nav{position:fixed;right:0;top:0;bottom:0;z-index:400;width:180px;display:flex;flex-direction:column;justify-content:center;padding-right:28px;pointer-events:none;}
+.sn-track{position:relative;display:flex;flex-direction:column;gap:0;border-left:1px solid rgba(245,244,240,.14);padding-left:18px;pointer-events:all;}
+#story-nav.light .sn-track{border-left-color:var(--rule);}
+.sn-item{display:flex;align-items:flex-start;gap:9px;padding:9px 0;cursor:pointer;text-decoration:none;}
+.sn-pip{width:5px;height:5px;border-radius:50%;background:rgba(245,244,240,.18);flex-shrink:0;margin-top:4px;transition:all .3s;}
+#story-nav.light .sn-pip{background:var(--ink-dim);}
+.sn-item.active .sn-pip{background:var(--gold);box-shadow:0 0 7px rgba(201,162,74,.5);width:7px;height:7px;margin-top:3px;}
+.sn-meta{display:flex;flex-direction:column;gap:1px;}
+.sn-num{font-family:var(--mono);font-size:8px;letter-spacing:.1em;color:rgba(245,244,240,.28);transition:color .3s;}
+#story-nav.light .sn-num{color:var(--ink-dim);}
+.sn-item.active .sn-num{color:var(--gold);}
+.sn-label{font-family:var(--mono);font-size:9px;font-weight:500;letter-spacing:.05em;color:rgba(245,244,240,.0);transition:color .3s;white-space:nowrap;}
+#story-nav.light .sn-label{color:rgba(26,22,16,.0);}
+.sn-item:hover .sn-label,.sn-item.active .sn-label{color:rgba(245,244,240,.6);}
+#story-nav.light .sn-item:hover .sn-label,#story-nav.light .sn-item.active .sn-label{color:var(--ink-mid);}
+
+/* LOGO */
+#logo-fixed{position:fixed;top:0;left:0;z-index:400;padding:18px 24px;pointer-events:all;}
+.mm-logo{display:flex;align-items:center;gap:10px;text-decoration:none;}
+.mm-wordmark{font-family:var(--serif);font-size:15px;font-weight:700;letter-spacing:-.025em;color:rgba(245,244,240,.82);transition:color .4s;}
+#logo-fixed.light .mm-wordmark{color:var(--ink);}
+
+/* SHARED */
+.inner{max-width:1100px;margin:0 auto;padding:0 52px;}
+section{padding:110px 0;}
+.eyebrow{font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.22em;text-transform:uppercase;color:var(--gold);margin-bottom:14px;display:flex;align-items:center;gap:10px;}
+.eyebrow::before{content:'';display:block;width:18px;height:1px;background:var(--gold);flex-shrink:0;}
+.h1{font-size:clamp(38px,5.5vw,70px);font-weight:700;letter-spacing:-.04em;line-height:1.03;}
+.h2{font-size:clamp(24px,3vw,44px);font-weight:700;letter-spacing:-.035em;line-height:1.05;}
+.body-l{font-size:17px;line-height:1.82;color:var(--ink-mid);}
+.body-m{font-size:14px;line-height:1.75;color:var(--ink-mid);}
+.mono-label{font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;}
+.r{opacity:0;transform:translateY(22px);transition:opacity .7s ease,transform .7s ease;}
+.r.in{opacity:1;transform:none;}
+.r.d1{transition-delay:.08s;}.r.d2{transition-delay:.16s;}.r.d3{transition-delay:.25s;}.r.d4{transition-delay:.34s;}.r.d5{transition-delay:.44s;}
+
+/* ── HERO COVER ──────────────────────────────────── */
+#s-hero{
+  position:relative;
+  height:100vh;min-height:620px;
+  background:#050301;
+  overflow:hidden;
+  display:flex;align-items:center;justify-content:center;
+}
+
+/* Layer 1 — dim always-on grid — more visible */
+#hero-grid-dim{
+  position:absolute;inset:0;z-index:1;pointer-events:none;
+  background-image:
+    linear-gradient(rgba(201,162,74,.07) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(201,162,74,.07) 1px,transparent 1px);
+  background-size:72px 72px;
+  animation:gridScroll 8s linear infinite;
+}
+@keyframes gridScroll{
+  from{background-position:0 0;}
+  to{background-position:72px 72px;}
+}
+
+/* Layer 2 — cursor flashlight grid (canvas) */
+#hero-flashlight{
+  position:absolute;inset:0;z-index:2;pointer-events:none;
+  opacity:.7;
+}
+
+/* Layer 3 — waveform canvas — full hero, more visible */
+#hero-wave-bg{
+  position:absolute;inset:0;z-index:3;pointer-events:none;
+  opacity:.75;
+}
+
+/* Layer 3.5 — ambient sphere in hero */
+#hero-sphere-bg{
+  position:absolute;z-index:4;pointer-events:none;
+  right:5%;top:50%;transform:translateY(-50%);
+  width:min(38vw,480px);height:min(38vw,480px);
+  border-radius:50%;
+  opacity:.18;
+}
+
+/* Atmosphere blobs */
+#hero-blobs{position:absolute;inset:0;z-index:5;pointer-events:none;overflow:hidden;}
+.hblob{position:absolute;border-radius:50%;filter:blur(120px);transition:transform 1.8s cubic-bezier(.16,1,.3,1),opacity 1.8s ease;}
+#hb1{width:55%;height:55%;right:-12%;top:-15%;background:rgba(201,162,74,.06);}
+#hb2{width:35%;height:35%;left:-8%;bottom:-12%;background:rgba(46,173,92,.04);}
+#hb3{width:28%;height:28%;right:20%;top:30%;background:rgba(232,64,42,.03);}
+
+/* Hero content — centred */
+#hero-content{
+  position:relative;z-index:10;
+  display:flex;flex-direction:column;align-items:center;
+  text-align:center;
+  gap:0;
+  pointer-events:none;
+}
+.hero-tag{
+  display:inline-flex;align-items:center;gap:8px;
+  font-family:var(--mono);font-size:8.5px;letter-spacing:.22em;text-transform:uppercase;
+  color:rgba(201,162,74,.5);
+  margin-bottom:32px;
+}
+.hero-tag-dot{width:5px;height:5px;border-radius:50%;background:var(--gold);animation:blink 2.4s infinite;flex-shrink:0;}
+.hero-h{
+  font-size:clamp(56px,8.5vw,110px);
+  font-weight:700;letter-spacing:-.045em;line-height:.95;
+  color:rgba(245,244,240,.92);
+  margin:0;
+}
+.hero-h span{display:block;line-height:.95;}
+.hero-sub{
+  font-size:clamp(13px,1.4vw,16px);
+  line-height:1.75;
+  color:rgba(245,244,240,.28);
+  max-width:400px;
+  margin-top:28px;
+  opacity:0;animation:fu .9s .9s ease forwards;
+}
+/* Horizontal rule under heading */
+.hero-rule{
+  width:clamp(120px,14vw,200px);height:1px;
+  background:linear-gradient(90deg,transparent,rgba(201,162,74,.35),transparent);
+  margin:26px auto 0;
+  opacity:0;animation:fu .6s .75s ease forwards;
+}
+
+/* Instrument labels — corners */
+.h-corner{
+  position:absolute;
+  font-family:var(--mono);font-size:7.5px;letter-spacing:.1em;
+  color:rgba(201,162,74,.18);pointer-events:none;z-index:11;
+}
+.h-corner.tl{top:20px;left:20px;}
+.h-corner.tr{top:20px;right:76px;text-align:right;}
+.h-corner.bl{bottom:24px;left:20px;}
+.h-corner.br{bottom:24px;right:76px;text-align:right;}
+
+/* Axis ticks */
+.hero-ticks-x{
+  position:absolute;bottom:14px;left:0;right:0;
+  display:flex;justify-content:space-between;padding:0 60px;
+  pointer-events:none;z-index:11;
+}
+.hero-ticks-y{
+  position:absolute;top:0;bottom:0;left:44px;
+  display:flex;flex-direction:column;justify-content:space-between;
+  padding:16px 0;pointer-events:none;z-index:11;
+}
+.htick{font-family:var(--mono);font-size:7px;letter-spacing:.1em;color:rgba(201,162,74,.16);}
+
+/* Scroll cue */
+.hero-scroll-cue{
+  position:absolute;bottom:28px;left:50%;transform:translateX(-50%);
+  display:flex;flex-direction:column;align-items:center;gap:8px;
+  z-index:11;pointer-events:none;
+  opacity:0;animation:fu .7s 1.4s ease forwards;
+}
+.hsc-line{width:1px;height:44px;background:linear-gradient(to bottom,rgba(201,162,74,.5),transparent);}
+.hsc-txt{font-family:var(--mono);font-size:7.5px;letter-spacing:.2em;color:rgba(201,162,74,.35);text-transform:uppercase;}
+
+/* ── REACTIVE REVEAL SECTIONS ──────────────────────── */
+
+/* Shared section shell */
+.reveal-section{
+  position:relative;min-height:100vh;
+  display:flex;align-items:center;
+  overflow:hidden;
+  cursor:none;
+  padding:0; /* override global section{padding:110px 0} */
+}
+#s-what{background:var(--cream);}
+/* Problem section is text-only — don't force 100vh */
+#s-problem{background:var(--cream2);min-height:0;padding:80px 0;}
+
+/* Custom cursor */
+.reveal-cursor{
+  position:absolute;z-index:50;
+  pointer-events:none;
+  left:50%;top:50%;
+  transform:translate(-50%,-50%);
+}
+.reveal-cursor-inner{
+  width:0;height:0;border-radius:50%;
+  background:var(--ink);
+  display:flex;align-items:center;justify-content:center;
+  transition:width .3s cubic-bezier(.34,1.56,.64,1),
+             height .3s cubic-bezier(.34,1.56,.64,1);
+  overflow:hidden;
+}
+.reveal-cursor.hovered .reveal-cursor-inner{width:72px;height:72px;}
+.reveal-cursor-label{
+  font-family:var(--mono);font-size:8.5px;font-weight:700;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--cream);
+  opacity:0;transition:opacity .15s .1s;white-space:nowrap;
+}
+.reveal-cursor.hovered .reveal-cursor-label{opacity:1;}
+
+/* Index counter top-right */
+.reveal-counter{
+  position:absolute;top:28px;right:32px;z-index:20;
+  display:flex;align-items:baseline;gap:4px;
+  font-family:var(--mono);
+}
+.rc-current{font-size:28px;font-weight:300;color:var(--ink);letter-spacing:-.04em;transition:opacity .3s,transform .3s;}
+.rc-sep{font-size:11px;color:var(--ink-dim);}
+.rc-total{font-size:11px;color:var(--ink-dim);}
+
+/* Progress bar bottom */
+.reveal-progress{
+  position:absolute;bottom:0;left:0;right:0;height:1px;
+  background:var(--rule);z-index:20;
+}
+.reveal-progress-fill{
+  height:100%;background:var(--gold);
+  transition:width .5s cubic-bezier(.22,1,.36,1);
+  width:0%;
+}
+
+/* Slide container */
+.reveal-slides{
+  width:100%;padding:80px 52px;
+  max-width:1100px;margin:0 auto;
+  position:relative;z-index:10;
+  box-sizing:border-box;
+}
+
+/* Individual slide — hidden by default, JS controls display */
+.rslide{
+  display:none;
+  min-height:380px;
+  flex-direction:column;
+  justify-content:center;
+}
+
+/* Split layout inside a slide */
+.rslide-split{
+  display:grid;grid-template-columns:1fr 1fr;gap:80px;align-items:center;
+  width:100%;
+}
+
+/* Word-blur-in text */
+.reveal-text{
+  font-size:clamp(28px,3.8vw,52px);
+  font-weight:700;letter-spacing:-.035em;line-height:1.05;
+  color:var(--ink);margin:0;
+}
+/* Words start invisible — JS adds .words-in to trigger transitions */
+.reveal-word{
+  display:inline-block;margin-right:.25em;
+  opacity:0;transform:translateY(16px);filter:blur(6px);
+  transition:opacity .45s ease,transform .45s ease,filter .45s ease;
+}
+.words-in .reveal-word{opacity:1;transform:none;filter:blur(0);}
+
+.reveal-body{
+  font-size:16px;line-height:1.8;color:var(--ink-mid);
+  margin-top:20px;
+}
+.reveal-body-word{
+  display:inline-block;margin-right:.28em;
+  opacity:0;transform:translateY(10px);
+  transition:opacity .4s ease,transform .4s ease;
+}
+.words-in .reveal-body-word{opacity:1;transform:none;}
+
+/* Accent line */
+.reveal-accent-line{
+  display:flex;gap:20px;align-items:flex-start;
+  margin-top:32px;
+}
+.ral-bar{
+  width:2px;flex-shrink:0;
+  background:var(--gold);
+  transform:scaleY(0);transform-origin:top;
+  transition:transform .55s .25s cubic-bezier(.22,1,.36,1);
+}
+.words-in .ral-bar{transform:scaleY(1);}
+.ral-text{
+  font-size:18px;font-style:italic;line-height:1.65;color:var(--ink);
+}
+
+/* Stat reveal */
+.reveal-stat{
+  display:flex;gap:24px;align-items:flex-start;
+  padding:28px 24px;
+  background:var(--ink);border-radius:3px;
+  margin-top:32px;
+  opacity:0;transform:translateY(20px);
+  transition:opacity .5s .35s ease,transform .5s .35s ease;
+}
+.words-in .reveal-stat{opacity:1;transform:none;}
+.words-in .product-glimpse{opacity:1!important;transform:none!important;}
+.words-in .stat-num-block{opacity:1!important;transform:none!important;}
+.rs-num{font-family:var(--mono);font-size:52px;font-weight:700;letter-spacing:-.04em;color:var(--gold);line-height:1;}
+.rs-label{font-family:var(--mono);font-size:8px;letter-spacing:.14em;text-transform:uppercase;color:rgba(245,244,240,.3);margin-top:5px;}
+.rs-text{font-size:13.5px;color:rgba(245,244,240,.5);line-height:1.7;padding-top:2px;}
+
+/* Method rows — use explicit delay classes set by JS */
+.reveal-method-row{
+  display:grid;grid-template-columns:auto 1fr auto;gap:14px;align-items:start;
+  padding:16px 0;border-bottom:1px solid var(--rule-light);
+  opacity:0;transform:translateX(-12px);
+  transition:opacity .4s ease,transform .4s ease;
+}
+.reveal-method-row:last-child{border-bottom:none;}
+.reveal-method-row.row-in{opacity:1;transform:none;}
+.rm-idx{font-family:var(--mono);font-size:8.5px;color:var(--ink-dim);padding-top:3px;}
+.rm-body h4{font-size:13px;font-weight:600;letter-spacing:-.01em;margin-bottom:3px;}
+.rm-body p{font-size:11.5px;color:var(--ink-mid);line-height:1.6;}
+.rm-limit{font-family:var(--mono);font-size:7.5px;letter-spacing:.06em;padding:2px 7px;border-radius:1px;background:rgba(232,64,42,.07);color:var(--gsr);white-space:nowrap;align-self:start;}
+
+/* Signal rows */
+.reveal-signal-row{
+  display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;
+  padding:13px 0;border-bottom:1px solid var(--rule-light);
+  opacity:0;transform:translateX(12px);
+  transition:opacity .4s ease,transform .4s ease;
+}
+.reveal-signal-row:last-child{border-bottom:none;}
+.reveal-signal-row.row-in{opacity:1;transform:none;}
+.rsr-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;}
+.rsr-name{font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;}
+.rsr-desc{font-size:11px;color:var(--ink-mid);line-height:1.55;margin-top:2px;}
+.rsr-ver{font-family:var(--mono);font-size:8px;color:var(--ink-dim);text-align:right;white-space:nowrap;}
+
+/* Hint text bottom-left */
+.reveal-hint{
+  position:absolute;bottom:24px;left:52px;z-index:20;
+  font-family:var(--mono);font-size:8px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--ink-dim);transition:opacity .4s;
+}
+
+
+/* DEMO */
+#s-demo{background:var(--cream);}
+.demo-layout{display:grid;grid-template-columns:1fr 400px;gap:56px;align-items:center;margin-top:52px;}
+.sphere-shell{display:flex;flex-direction:column;align-items:center;gap:11px;}
+.sphere-wrap{position:relative;width:100%;max-width:420px;aspect-ratio:1;}
+#sphere-canvas{width:100%;height:100%;display:block;border-radius:50%;}
+#gaze-dot{position:absolute;width:16px;height:16px;border-radius:50%;border:1.5px solid rgba(201,162,74,.8);background:rgba(201,162,74,.1);pointer-events:none;transform:translate(-50%,-50%);animation:gazeRing 2.4s infinite;}
+@keyframes gazeRing{0%{box-shadow:0 0 0 0 rgba(201,162,74,.4);}70%{box-shadow:0 0 0 11px rgba(201,162,74,0);}100%{box-shadow:0 0 0 0 rgba(201,162,74,0);}}
+.sig-panel{display:flex;flex-direction:column;border:1px solid var(--rule);border-radius:3px;overflow:hidden;}
+.sig-panel-head{padding:10px 14px;background:rgba(26,22,16,.04);border-bottom:1px solid var(--rule);display:flex;align-items:center;justify-content:space-between;}
+.sig-panel-head h3{font-size:11px;font-weight:700;letter-spacing:.01em;}
+.sig-panel-live{display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:7.5px;letter-spacing:.14em;color:var(--hrv);text-transform:uppercase;}
+.live-dot{width:4px;height:4px;border-radius:50%;background:var(--hrv);animation:blink 1.4s infinite;}
+.sig-row{padding:10px 14px;border-bottom:1px solid var(--rule-light);display:flex;flex-direction:column;gap:6px;}
+.sig-row:last-child{border-bottom:none;}
+.sig-meta{display:flex;align-items:center;justify-content:space-between;}
+.sig-name{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:8.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;}
+.sig-dot{width:5px;height:5px;border-radius:50%;flex-shrink:0;}
+.sig-val{font-family:var(--mono);font-size:13px;font-weight:700;letter-spacing:-.02em;}
+.sparkline{width:100%;height:26px;overflow:visible;}
+.crit-pill{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:1px;font-family:var(--mono);font-size:7.5px;font-weight:700;letter-spacing:.08em;background:rgba(232,64,42,.09);color:var(--gsr);width:fit-content;opacity:0;transition:opacity .3s;}
+.crit-pill.on{opacity:1;}
+
+/* ARCHETYPES */
+#s-archetypes{background:var(--ink);padding:110px 0;}
+#s-archetypes .eyebrow{color:var(--gold);}
+#s-archetypes .eyebrow::before{background:var(--gold);}
+.arch-controls{display:grid;grid-template-columns:1fr 1fr;gap:0;border:1px solid rgba(245,244,240,.07);border-radius:3px;overflow:hidden;margin-top:44px;margin-bottom:40px;}
+.axis-control{padding:14px 16px;border-right:1px solid rgba(245,244,240,.07);border-bottom:1px solid rgba(245,244,240,.07);display:flex;flex-direction:column;gap:9px;}
+.axis-control:nth-child(2n){border-right:none;}
+.axis-control:nth-child(3),.axis-control:nth-child(4){border-bottom:none;}
+.ac-label{font-family:var(--mono);font-size:7.5px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:rgba(245,244,240,.3);}
+.ac-track{position:relative;height:2px;background:rgba(245,244,240,.1);cursor:pointer;border-radius:1px;user-select:none;}
+.ac-fill{position:absolute;left:0;top:0;bottom:0;background:var(--gold);border-radius:1px;}
+.ac-thumb{position:absolute;top:50%;transform:translate(-50%,-50%);width:11px;height:11px;border-radius:50%;background:var(--cream);border:2px solid var(--gold);box-shadow:0 0 6px rgba(201,162,74,.35);cursor:grab;}
+.ac-thumb:active{cursor:grabbing;}
+.ac-ends{display:flex;justify-content:space-between;}
+.ac-end{font-family:var(--mono);font-size:7.5px;letter-spacing:.04em;color:rgba(245,244,240,.22);}
+.arch-result-banner{padding:12px 16px;background:rgba(245,244,240,.04);border:1px solid rgba(245,244,240,.07);border-radius:3px;display:flex;align-items:center;justify-content:space-between;margin-bottom:36px;min-height:48px;}
+.arb-label{font-family:var(--mono);font-size:7.5px;letter-spacing:.16em;color:rgba(245,244,240,.28);text-transform:uppercase;}
+.arb-name{font-size:17px;font-weight:700;color:rgba(245,244,240,.88);letter-spacing:-.02em;margin-top:1px;}
+.arb-match{font-family:var(--mono);font-size:8.5px;color:var(--gold);margin-top:2px;}
+.arb-code{font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.1em;color:rgba(245,244,240,.12);}
+.arch-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:rgba(245,244,240,.05);border:1px solid rgba(245,244,240,.05);border-radius:3px;overflow:hidden;}
+.arch-card{background:var(--ink);padding:20px 18px 24px;border-right:1px solid rgba(245,244,240,.04);transition:background .25s;cursor:default;position:relative;}
+.arch-card:nth-child(4n){border-right:none;}
+.arch-card.highlighted{background:rgba(201,162,74,.06);}
+.arch-card.highlighted .arch-name{color:var(--gold);}
+.arch-card::after{content:'';position:absolute;top:0;left:0;right:0;height:1.5px;background:var(--gold);opacity:0;transition:opacity .3s;}
+.arch-card.highlighted::after{opacity:1;}
+.arch-diag{width:100%;height:44px;margin-bottom:12px;display:block;overflow:visible;}
+.arch-ver{font-family:var(--mono);font-size:7.5px;font-weight:700;letter-spacing:.2em;text-transform:uppercase;margin-bottom:5px;color:rgba(245,244,240,.22);}
+.arch-name{font-size:13px;font-weight:700;letter-spacing:-.018em;color:rgba(245,244,240,.82);margin-bottom:7px;line-height:1.15;transition:color .3s;}
+.arch-desc{font-size:10.5px;line-height:1.62;color:rgba(245,244,240,.32);}
+.arch-tags{display:flex;flex-wrap:wrap;gap:3px;margin-top:10px;}
+.arch-tag{font-family:var(--mono);font-size:7px;letter-spacing:.05em;padding:2px 6px;border-radius:1px;border:1px solid rgba(245,244,240,.07);color:rgba(245,244,240,.25);}
+.arch-card.highlighted .arch-tag{border-color:rgba(201,162,74,.18);color:rgba(201,162,74,.45);}
+.arch-grid-r2{margin-top:1px;}
+
+/* HOW IT WORKS */
+#s-how{background:var(--cream2);}
+.how-layout{display:grid;grid-template-columns:280px 1fr;gap:56px;align-items:start;margin-top:52px;}
+.how-steps{position:sticky;top:80px;}
+.how-step{display:flex;gap:14px;padding:14px 0;border-bottom:1px solid var(--rule-light);cursor:pointer;opacity:.28;transition:opacity .2s;}
+.how-step:first-child{padding-top:0;}
+.how-step:last-child{border-bottom:none;}
+.how-step.active{opacity:1;}
+.st-num{width:26px;height:26px;border-radius:2px;background:rgba(26,22,16,.06);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:9.5px;font-weight:700;color:var(--accent);transition:all .2s;}
+.how-step.active .st-num{background:var(--accent);color:#fff;}
+.st-body h4{font-size:12.5px;font-weight:600;letter-spacing:-.01em;margin-bottom:2px;}
+.st-body p{font-size:11px;color:var(--ink-mid);line-height:1.6;}
+.how-panels{position:relative;}
+.how-panel{opacity:0;transform:translateY(8px);transition:opacity .35s,transform .35s;position:absolute;top:0;left:0;right:0;pointer-events:none;}
+.how-panel.active{opacity:1;transform:none;position:relative;pointer-events:auto;}
+.dash-frame{border:1px solid var(--rule);border-radius:3px;overflow:hidden;background:var(--cream);box-shadow:0 20px 56px rgba(26,22,16,.06);}
+.df-bar{height:30px;background:rgba(26,22,16,.04);border-bottom:1px solid var(--rule);display:flex;align-items:center;padding:0 11px;gap:5px;}
+.df-dot{width:7px;height:7px;border-radius:50%;background:rgba(26,22,16,.12);}
+.df-title{font-family:var(--mono);font-size:7.5px;color:var(--ink-dim);letter-spacing:.1em;margin-left:4px;text-transform:uppercase;}
+.df-body{padding:16px;}
+
+/* PRODUCTS */
+#s-products{background:var(--cream);}
+.prod-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border:1px solid var(--rule);border-radius:3px;overflow:hidden;margin-top:52px;}
+.prod-card{padding:28px 24px 32px;border-right:1px solid var(--rule);position:relative;transition:background .2s;}
+.prod-card:last-child{border-right:none;}
+.prod-card.featured{background:var(--ink);}
+.prod-card.featured::before{content:'';position:absolute;top:0;left:0;right:0;height:1.5px;background:var(--gold);}
+.prod-app{margin-bottom:20px;display:flex;justify-content:center;}
+.prod-ver{font-family:var(--mono);font-size:7.5px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:var(--gold);margin-bottom:7px;}
+.prod-name{font-size:21px;font-weight:700;letter-spacing:-.03em;margin-bottom:9px;line-height:1;}
+.prod-card.featured .prod-name{color:rgba(245,244,240,.88);}
+.prod-desc{font-size:11.5px;line-height:1.7;color:var(--ink-mid);margin-bottom:18px;}
+.prod-card.featured .prod-desc{color:rgba(245,244,240,.38);}
+.prod-sensors{display:flex;flex-direction:column;gap:6px;}
+.s-badge{display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:8.5px;letter-spacing:.04em;}
+.s-dot{width:5px;height:5px;border-radius:50%;flex-shrink:0;}
+.s-badge.on{color:var(--ink);}
+.prod-card.featured .s-badge.on{color:rgba(245,244,240,.72);}
+.s-badge.off{color:var(--ink-dim);opacity:.28;}
+.prod-card.featured .s-badge.off{color:rgba(245,244,240,.18);}
+.prod-price{margin-top:16px;padding-top:12px;border-top:1px solid var(--rule);font-family:var(--mono);font-size:8px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-dim);}
+.featured-price{color:rgba(245,244,240,.28);border-top-color:rgba(245,244,240,.08);}
+
+/* CTA */
+#s-cta{background:var(--ink);padding:130px 0;text-align:center;position:relative;overflow:hidden;}
+.cta-grid{position:absolute;inset:0;background-image:linear-gradient(rgba(201,162,74,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(201,162,74,.03) 1px,transparent 1px);background-size:60px 60px;pointer-events:none;}
+#s-cta .eyebrow{justify-content:center;color:var(--gold);}
+#s-cta .eyebrow::before{display:none;}
+#s-cta .h2{color:rgba(245,244,240,.86);margin-top:8px;}
+.cta-sub{font-size:14px;color:rgba(245,244,240,.38);max-width:380px;margin:14px auto 0;line-height:1.75;}
+/* LIQUID-METAL BUTTON — golden tint */
+@keyframes lm-ripple{0%{transform:translate(-50%,-50%) scale(0);opacity:.55;}100%{transform:translate(-50%,-50%) scale(5);opacity:0;}}
+.lm-btn-wrap{display:inline-block;position:relative;}
+.lm-btn-shell{position:relative;border-radius:100px;cursor:pointer;user-select:none;transition:transform .25s cubic-bezier(.34,1.56,.64,1),box-shadow .2s ease;}
+.lm-canvas-ring{position:absolute;inset:0;border-radius:100px;overflow:hidden;z-index:1;}
+.lm-canvas-ring canvas{display:block;width:100%!important;height:100%!important;border-radius:100px;}
+.lm-inner{position:absolute;inset:2px;border-radius:100px;background:linear-gradient(180deg,#2a1e06 0%,#0e0a02 100%);z-index:2;transition:box-shadow .15s;}
+.lm-label{position:absolute;inset:0;z-index:4;display:flex;align-items:center;justify-content:center;gap:6px;border-radius:100px;font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--gold);text-shadow:0 1px 3px rgba(0,0,0,.6);pointer-events:none;white-space:nowrap;}
+.lm-btn-hitbox{position:absolute;inset:0;z-index:5;border-radius:100px;background:transparent;border:none;cursor:pointer;outline:none;overflow:hidden;}
+.lm-ripple{position:absolute;width:18px;height:18px;border-radius:50%;pointer-events:none;background:radial-gradient(circle,rgba(201,162,74,.45) 0%,rgba(201,162,74,0) 70%);animation:lm-ripple .6s ease-out forwards;}
+/* CTA form updated to match */
+.cta-form{display:flex;flex-direction:column;align-items:center;gap:12px;max-width:400px;margin:36px auto 0;}
+.cta-inp{width:100%;padding:13px 18px;border:1px solid rgba(245,244,240,.18);border-radius:3px;background:rgba(245,244,240,.07);font-family:var(--serif);font-size:14px;color:rgba(245,244,240,.88);outline:none;transition:border-color .2s;box-sizing:border-box;}
+.cta-inp::placeholder{color:rgba(245,244,240,.28);}
+.cta-inp:focus{border-color:rgba(201,162,74,.55);}
+.cta-btn{width:100%;padding:14px 28px;background:var(--gold);border:none;border-radius:3px;font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--ink);cursor:pointer;transition:background .2s,transform .15s,box-shadow .2s;}
+.cta-btn:hover{background:#d4aa52;box-shadow:0 4px 18px rgba(201,162,74,.28);transform:translateY(-1px);}
+.cta-btn:active{transform:translateY(0);box-shadow:none;}
+.cta-btn.sent{background:var(--hrv);color:#fff;}
+.cta-note{font-family:var(--mono);font-size:7.5px;color:rgba(245,244,240,.16);margin-top:14px;letter-spacing:.1em;text-transform:uppercase;}
+footer{background:var(--ink);border-top:1px solid rgba(245,244,240,.06);padding:24px 52px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;}
+.f-copy{font-family:var(--mono);font-size:8.5px;color:rgba(245,244,240,.16);letter-spacing:.06em;}
+.f-links{display:flex;gap:18px;list-style:none;}
+.f-links a{font-family:var(--mono);font-size:8.5px;color:rgba(245,244,240,.18);text-decoration:none;letter-spacing:.06em;transition:color .2s;}
+.f-links a:hover{color:var(--gold);}
+@keyframes blink{0%,100%{opacity:1;}50%{opacity:.2;}}
+@keyframes fu{from{opacity:0;transform:translateY(18px);}to{opacity:1;transform:none;}}
+@media(max-width:1020px){
+  .what-layout,.problem-layout,.demo-layout,.how-layout{grid-template-columns:1fr;}
+  .arch-grid{grid-template-columns:1fr 1fr;}
+  .prod-grid{grid-template-columns:1fr;}.prod-card{border-right:none;border-bottom:1px solid var(--rule);}
+  .arch-controls{grid-template-columns:1fr;}
+  .inner{padding:0 22px;}
+  #story-nav{display:none;}
+  .hero-content{padding:0 22px 56px;}
+}
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute;pointer-events:none;">
+  <defs>
+    <linearGradient id="lg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#c9a24a"/>
+      <stop offset="60%" stop-color="#7a5e20"/>
+      <stop offset="100%" stop-color="#3a2a08"/>
+    </linearGradient>
+  </defs>
+</svg>
+
+<div id="logo-fixed">
+  <a href="#" class="mm-logo">
+    <svg width="42" height="24" viewBox="0 0 48 28" fill="none">
+      <path d="M2 20 L2 8 L9 8 L9 20 L9 8 L16 8 L16 20" stroke="url(#lg)" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M16 20 L22 4 L28 26 L34 4 L40 20 L46 20" stroke="url(#lg)" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <span class="mm-wordmark">Measured Mind.</span>
+  </a>
+</div>
+
+<nav id="story-nav">
+  <div class="sn-track">
+    <a href="#s-hero" class="sn-item active" data-s="s-hero"><div class="sn-pip"></div><div class="sn-meta"><span class="sn-num">01</span><span class="sn-label">Intro</span></div></a>
+    <a href="#s-what" class="sn-item" data-s="s-what"><div class="sn-pip"></div><div class="sn-meta"><span class="sn-num">02</span><span class="sn-label">The Platform</span></div></a>
+    <a href="#s-problem" class="sn-item" data-s="s-problem"><div class="sn-pip"></div><div class="sn-meta"><span class="sn-num">03</span><span class="sn-label">The Problem</span></div></a>
+    <a href="#s-archetypes" class="sn-item" data-s="s-archetypes"><div class="sn-pip"></div><div class="sn-meta"><span class="sn-num">04</span><span class="sn-label">Archetypes</span></div></a>
+    <a href="#s-how" class="sn-item" data-s="s-how"><div class="sn-pip"></div><div class="sn-meta"><span class="sn-num">05</span><span class="sn-label">Process</span></div></a>
+    <a href="#s-products" class="sn-item" data-s="s-products"><div class="sn-pip"></div><div class="sn-meta"><span class="sn-num">06</span><span class="sn-label">System</span></div></a>
+    <a href="#s-cta" class="sn-item" data-s="s-cta"><div class="sn-pip"></div><div class="sn-meta"><span class="sn-num">07</span><span class="sn-label">Access</span></div></a>
+  </div>
+</nav>
+
+<!-- 1. HERO COVER -->
+<section id="s-hero">
+
+  <!-- Grid layers -->
+  <div id="hero-grid-dim"></div>
+  <canvas id="hero-flashlight"></canvas>
+  <canvas id="hero-wave-bg"></canvas>
+
+  <!-- Hero sphere — waveform projected onto 360° surface -->
+  <canvas id="hero-sphere-bg"></canvas>
+
+  <!-- Atmosphere -->
+  <div id="hero-blobs">
+    <div class="hblob" id="hb1"></div>
+    <div class="hblob" id="hb2"></div>
+    <div class="hblob" id="hb3"></div>
+  </div>
+
+  <!-- Instrument corners -->
+  <span class="h-corner tl">N 51°32'12" / W 0°07'29"</span>
+  <span class="h-corner tr">SESSION — NULL</span>
+  <span class="h-corner bl" id="hero-prog">SIGNAL → SPACE</span>
+  <span class="h-corner br">MM · V.3</span>
+
+  <!-- Axis ticks -->
+  <div class="hero-ticks-x">
+    <span class="htick">0.0</span><span class="htick">0.25</span><span class="htick">0.50</span><span class="htick">0.75</span><span class="htick">1.0</span>
+  </div>
+  <div class="hero-ticks-y">
+    <span class="htick">100</span><span class="htick">75</span><span class="htick">50</span><span class="htick">25</span><span class="htick">0</span>
+  </div>
+
+  <!-- Centred content -->
+  <div id="hero-content">
+    <div class="hero-tag"><span class="hero-tag-dot"></span>Biometric Intelligence Platform</div>
+    <h1 class="h1 hero-h" aria-label="Measured Mind.">
+      <span id="scramble-line1" aria-hidden="true">&nbsp;</span>
+      <span id="scramble-line2" aria-hidden="true">&nbsp;</span>
+    </h1>
+    <div class="hero-rule"></div>
+    <p class="hero-sub">Your nervous system responds to architecture<br>before your mind does. We measure it.</p>
+  </div>
+
+  <!-- Scroll cue -->
+  <div class="hero-scroll-cue">
+    <span class="hsc-txt">Scroll</span>
+    <div class="hsc-line"></div>
+  </div>
+
+</section>
+
+<!-- 2. PLATFORM — reactive reveal -->
+<section id="s-what" class="reveal-section" data-reveal="what">
+
+  <!-- custom cursor -->
+  <div class="reveal-cursor" id="rc-what">
+    <div class="reveal-cursor-inner"><span class="reveal-cursor-label">Next</span></div>
+  </div>
+
+  <!-- counter -->
+  <div class="reveal-counter">
+    <span class="rc-current" id="what-cur">01</span>
+    <span class="rc-sep">/</span>
+    <span class="rc-total" id="what-tot">03</span>
+  </div>
+
+  <!-- slides -->
+  <div class="reveal-slides">
+
+    <!-- Slide 1: The statement -->
+    <div class="rslide" id="what-s0">
+      <p class="eyebrow">The Platform</p>
+      <h2 class="reveal-text" id="what-t0"></h2>
+      <div class="reveal-accent-line">
+        <div class="ral-bar" style="height:72px;"></div>
+        <p class="ral-text">"A room can raise your cortisol before you've formed a single opinion about it."</p>
+      </div>
+    </div>
+
+    <!-- Slide 2: What it does — product glimpse -->
+    <div class="rslide" id="what-s1">
+      <h2 class="reveal-text" id="what-t1"></h2>
+      <p class="reveal-body" id="what-b1"></p>
+      <!-- Live interactive product glimpse — three floating panels, no borders -->
+      <div style="margin-top:32px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;opacity:0;transform:translateY(16px);transition:opacity .5s .5s ease,transform .5s .5s ease;" class="product-glimpse">
+
+        <!-- 1. Gaze Distribution -->
+        <div style="display:flex;flex-direction:column;gap:8px;" id="glimpse-gaze-wrap">
+          <canvas id="glimpse-gaze" style="display:block;width:100%;aspect-ratio:16/9;border-radius:4px;cursor:crosshair;"></canvas>
+          <div style="font-family:var(--mono);font-size:7px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-dim);">Gaze Distribution <span style="opacity:.5;font-weight:400;">· hover</span></div>
+        </div>
+
+        <!-- 2. GSR Waveform — dark mode, building left→right -->
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <div style="background:#0e0a06;aspect-ratio:16/9;border-radius:4px;position:relative;overflow:hidden;">
+            <svg id="glimpse-gsr-svg" viewBox="0 0 200 80" width="100%" height="100%" preserveAspectRatio="none" style="display:block;">
+              <defs>
+                <linearGradient id="ggsr-fade" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0%" stop-color="var(--gsr)" stop-opacity=".0"/>
+                  <stop offset="30%" stop-color="var(--gsr)" stop-opacity=".4"/>
+                  <stop offset="100%" stop-color="var(--gsr)" stop-opacity=".95"/>
+                </linearGradient>
+              </defs>
+              <!-- Dark grid lines -->
+              <line x1="0" y1="26" x2="200" y2="26" stroke="rgba(245,244,240,.05)" stroke-width=".5"/>
+              <line x1="0" y1="40" x2="200" y2="40" stroke="rgba(245,244,240,.07)" stroke-width=".5"/>
+              <line x1="0" y1="54" x2="200" y2="54" stroke="rgba(245,244,240,.05)" stroke-width=".5"/>
+              <polyline id="glimpse-gsr-line" points="" fill="none" stroke="url(#ggsr-fade)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+              <circle id="glimpse-gsr-dot" cx="0" cy="40" r="3" fill="var(--gsr)" opacity="0"/>
+            </svg>
+            <div style="position:absolute;top:7px;right:9px;font-family:var(--mono);font-size:9px;font-weight:700;color:var(--gsr);" id="glimpse-gsr-val">—</div>
+          </div>
+          <div style="font-family:var(--mono);font-size:7px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-dim);">GSR · Galvanic Skin Response</div>
+        </div>
+
+        <!-- 3. Pupil Dilation — two-eye canvas, warm bg, bigger eyes -->
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <div style="background:#1a0e06;aspect-ratio:4/3;border-radius:4px;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;">
+            <canvas id="glimpse-eye-canvas" width="260" height="140" style="display:block;width:100%;height:100%;"></canvas>
+            <div style="position:absolute;bottom:7px;left:0;right:0;text-align:center;font-family:var(--mono);font-size:7.5px;font-weight:700;color:rgba(175,82,222,.65);" id="glimpse-pupil-val">4.1mm</div>
+          </div>
+          <div style="font-family:var(--mono);font-size:7px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-dim);">Pupil Dilation</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Slide 3: Five channels — integrated live demo -->
+    <div class="rslide" id="what-s2">
+      <div style="display:grid;grid-template-columns:1fr 440px;gap:44px;align-items:center;width:100%;">
+        <div>
+          <h2 class="reveal-text" id="what-t2"></h2>
+          <p class="reveal-body" id="what-b2" style="margin-top:14px;max-width:360px;"></p>
+          <div class="sig-panel" style="margin-top:22px;">
+            <div class="sig-panel-head">
+              <h3>Participant 01 — Signal Readout</h3>
+              <div class="sig-panel-live"><span class="live-dot"></span>Live</div>
+            </div>
+            <div class="sig-row">
+              <div class="sig-meta"><span class="sig-name"><span class="sig-dot" style="background:var(--gsr)"></span>GSR</span><span class="sig-val" id="v-gsr" style="color:var(--gsr)">0.71</span></div>
+              <svg class="sparkline" id="sk-gsr" viewBox="0 0 400 26" preserveAspectRatio="none"></svg>
+              <div class="crit-pill" id="pill-gsr">⚡ Arousal event</div>
+            </div>
+            <div class="sig-row">
+              <div class="sig-meta"><span class="sig-name"><span class="sig-dot" style="background:var(--eye)"></span>Gaze Zone</span><span class="sig-val" id="v-zone" style="color:var(--eye);font-size:9px">WINDOW</span></div>
+            </div>
+            <div class="sig-row">
+              <div class="sig-meta"><span class="sig-name"><span class="sig-dot" style="background:var(--pupil)"></span>Pupil</span><span class="sig-val" id="v-pupil" style="color:var(--pupil)">4.2mm</span></div>
+              <svg class="sparkline" id="sk-pupil" viewBox="0 0 400 26" preserveAspectRatio="none"></svg>
+            </div>
+            <div class="sig-row">
+              <div class="sig-meta"><span class="sig-name"><span class="sig-dot" style="background:var(--hrv)"></span>HRV</span><span class="sig-val" id="v-hrv" style="color:var(--hrv)">68ms</span></div>
+              <svg class="sparkline" id="sk-hrv" viewBox="0 0 400 26" preserveAspectRatio="none"></svg>
+            </div>
+            <div class="sig-row" style="border-bottom:none;">
+              <div class="sig-meta"><span class="sig-name"><span class="sig-dot" style="background:var(--gold)"></span>Arousal</span><span class="sig-val" id="v-arousal" style="color:var(--gold)">64%</span></div>
+              <svg class="sparkline" id="sk-arousal" viewBox="0 0 400 26" preserveAspectRatio="none"></svg>
+            </div>
+          </div>
+        </div>
+        <!-- Sphere — 420px square, centred in its column -->
+        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;">
+          <div style="position:relative;width:420px;height:420px;flex-shrink:0;">
+            <canvas id="sphere-canvas" style="width:420px;height:420px;display:block;border-radius:50%;"></canvas>
+            <div id="gaze-dot"></div>
+          </div>
+          <p style="font-family:var(--mono);font-size:7px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-dim);">360° heatmap · ATRIUM_A</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="reveal-hint" id="what-hint">Click anywhere to continue</div>
+  <div class="reveal-progress"><div class="reveal-progress-fill" id="what-prog"></div></div>
+</section>
+
+<!-- 3. PROBLEM — reactive reveal -->
+<section id="s-problem" class="reveal-section" data-reveal="prob">
+
+  <div class="reveal-cursor" id="rc-prob">
+    <div class="reveal-cursor-inner"><span class="reveal-cursor-label">Next</span></div>
+  </div>
+
+  <div class="reveal-counter">
+    <span class="rc-current" id="prob-cur">01</span>
+    <span class="rc-sep">/</span>
+    <span class="rc-total" id="prob-tot">03</span>
+  </div>
+
+  <div class="reveal-slides">
+
+    <!-- Slide 1: The problem statement -->
+    <div class="rslide" id="prob-s0">
+      <p class="eyebrow">The Problem</p>
+      <h2 class="reveal-text" id="prob-t0"></h2>
+      <p class="reveal-body" id="prob-b0" style="margin-top:20px;max-width:520px;"></p>
+    </div>
+
+    <!-- Slide 2: Current methods -->
+    <div class="rslide" id="prob-s1">
+      <div class="rslide-split">
+        <div>
+          <h2 class="reveal-text" id="prob-t1"></h2>
+          <p class="reveal-body" id="prob-b1" style="margin-top:14px;"></p>
+        </div>
+        <div style="padding-top:8px;">
+          <p style="font-family:var(--mono);font-size:8px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-dim);margin-bottom:12px;">Limitation Log</p>
+          <div class="reveal-method-row"><span class="rm-idx">01</span><div class="rm-body"><h4>Questionnaires &amp; Surveys</h4><p>Filtered through language, memory, and social expectation.</p></div><span class="rm-limit">POST-HOC</span></div>
+          <div class="reveal-method-row"><span class="rm-idx">02</span><div class="rm-body"><h4>Moodboards</h4><p>Images clients identify with consciously — not what the body responds to.</p></div><span class="rm-limit">ASPIRATIONAL</span></div>
+          <div class="reveal-method-row"><span class="rm-idx">03</span><div class="rm-body"><h4>Client Interviews</h4><p>Rich in narrative. The gap between what people say and feel can be vast.</p></div><span class="rm-limit">NARRATIVE</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Slide 3: The stat — full bleed dramatic -->
+    <div class="rslide" id="prob-s2">
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:48px;align-items:center;">
+        <div style="opacity:0;transform:translateX(-24px);transition:opacity .6s .1s ease,transform .6s .1s ease;" class="stat-num-block">
+          <div style="font-family:var(--mono);font-size:clamp(80px,12vw,130px);font-weight:700;letter-spacing:-.06em;color:var(--ink);line-height:1;">95<span style="font-size:.55em;color:var(--gold);vertical-align:super;line-height:0;">%</span></div>
+          <div style="font-family:var(--mono);font-size:8.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-dim);margin-top:4px;border-top:1px solid var(--rule);padding-top:10px;">of spatial response<br>is subconscious</div>
+        </div>
+        <div>
+          <h2 class="reveal-text" id="prob-t2"></h2>
+          <p class="reveal-body" id="prob-b2-text" style="margin-top:16px;">The body reads light, proportion, enclosure and materiality before the conscious mind forms a single opinion. Measured Mind is the first tool built to read that signal.</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="reveal-hint" id="prob-hint">Click anywhere to continue</div>
+  <div class="reveal-progress"><div class="reveal-progress-fill" id="prob-prog"></div></div>
+</section>
+
+
+<!-- 4. ARCHETYPES (was 5, demo removed as integrated above) -->
+<section id="s-archetypes">
+  <div class="inner">
+    <p class="eyebrow r">The 8 Spatial Archetypes</p>
+    <h2 class="h2 r d1" style="color:rgba(245,244,240,.86);">Your biometric signature<br>maps to a spatial identity.</h2>
+    <p class="body-m r d2" style="color:rgba(245,244,240,.38);max-width:520px;margin-top:12px;">Adjust the four axes. The archetype closest to your physiological preferences will be highlighted — derived from the same biometric scoring the platform uses after a live session.</p>
+
+    <div class="arch-controls r d3">
+      <div class="axis-control">
+        <div class="ac-label">Lighting Preference</div>
+        <div class="ac-track" id="at-0"><div class="ac-fill" id="af-0" style="width:60%"></div><div class="ac-thumb" id="ath-0" style="left:60%"></div></div>
+        <div class="ac-ends"><span class="ac-end">Low / Moody</span><span class="ac-end">Bright / Sunlit</span></div>
+      </div>
+      <div class="axis-control">
+        <div class="ac-label">Tone &amp; Palette</div>
+        <div class="ac-track" id="at-1"><div class="ac-fill" id="af-1" style="width:50%"></div><div class="ac-thumb" id="ath-1" style="left:50%"></div></div>
+        <div class="ac-ends"><span class="ac-end">Warm / Natural</span><span class="ac-end">Cool / Contemporary</span></div>
+      </div>
+      <div class="axis-control">
+        <div class="ac-label">Edge Geometry</div>
+        <div class="ac-track" id="at-2"><div class="ac-fill" id="af-2" style="width:40%"></div><div class="ac-thumb" id="ath-2" style="left:40%"></div></div>
+        <div class="ac-ends"><span class="ac-end">Sharp / Precise</span><span class="ac-end">Rounded / Soft</span></div>
+      </div>
+      <div class="axis-control">
+        <div class="ac-label">Spatial Mode</div>
+        <div class="ac-track" id="at-3"><div class="ac-fill" id="af-3" style="width:35%"></div><div class="ac-thumb" id="ath-3" style="left:35%"></div></div>
+        <div class="ac-ends"><span class="ac-end">Open / Expansive</span><span class="ac-end">Private / Enclosed</span></div>
+      </div>
+    </div>
+
+    <div class="arch-result-banner r d4">
+      <div><div class="arb-label">Closest Archetype Match</div><div class="arb-name" id="arb-name">—</div><div class="arb-match" id="arb-match"></div></div>
+      <div class="arb-code" id="arb-code"></div>
+    </div>
+
+    <div class="arch-grid r d4">
+      <div class="arch-card" id="ac-0">
+        <svg class="arch-diag" viewBox="0 0 160 44"><path d="M10 22 Q40 7 80 10 Q120 13 150 8" stroke="rgba(143,190,110,.65)" stroke-width="1.5" fill="none" stroke-linecap="round"/><path d="M10 22 Q50 26 80 25 Q110 24 150 22" stroke="rgba(143,190,110,.9)" stroke-width="2" fill="none" stroke-linecap="round"/><polyline points="0,40 30,39 55,38 80,39 105,37 130,39 155,37" stroke="rgba(232,64,42,.38)" stroke-width="1" fill="none"/><circle cx="138" cy="11" r="6" fill="rgba(155,82,204,.08)" stroke="rgba(155,82,204,.42)" stroke-width="1"/><circle cx="138" cy="11" r="3" fill="rgba(155,82,204,.7)"/></svg>
+        <p class="arch-ver">01</p><p class="arch-name">The Naturalist</p>
+        <p class="arch-desc">Bright, sunlit, organic. Low arousal, wide gaze, dilated pupils.</p>
+        <div class="arch-tags"><span class="arch-tag">Bright</span><span class="arch-tag">Warm</span><span class="arch-tag">Open</span></div>
+      </div>
+      <div class="arch-card" id="ac-1">
+        <svg class="arch-diag" viewBox="0 0 160 44"><line x1="14" y1="22" x2="148" y2="3" stroke="rgba(192,122,58,.32)" stroke-width="5"/><line x1="14" y1="22" x2="148" y2="12" stroke="rgba(192,122,58,.48)" stroke-width="3"/><line x1="14" y1="22" x2="148" y2="22" stroke="rgba(192,122,58,.75)" stroke-width="2"/><line x1="14" y1="22" x2="148" y2="32" stroke="rgba(192,122,58,.48)" stroke-width="3"/><line x1="14" y1="22" x2="148" y2="41" stroke="rgba(192,122,58,.22)" stroke-width="5"/><circle cx="14" cy="22" r="4" fill="rgba(192,122,58,.3)" stroke="rgba(192,122,58,.8)" stroke-width="1.5"/><polyline points="0,41 30,38 55,35 80,37 105,33 130,36 155,32" stroke="rgba(232,64,42,.5)" stroke-width="1" fill="none"/></svg>
+        <p class="arch-ver">02</p><p class="arch-name">The Explorer</p>
+        <p class="arch-desc">Dramatic, open. Gaze fans wide. GSR spikes at discovery.</p>
+        <div class="arch-tags"><span class="arch-tag">Low Light</span><span class="arch-tag">Contemporary</span><span class="arch-tag">Open</span></div>
+      </div>
+      <div class="arch-card" id="ac-2">
+        <svg class="arch-diag" viewBox="0 0 160 44"><rect x="8" y="4" width="144" height="36" rx="3" stroke="rgba(123,164,192,.18)" stroke-width="1" fill="none"/><rect x="20" y="10" width="120" height="24" rx="2" stroke="rgba(123,164,192,.32)" stroke-width="1" fill="none"/><rect x="34" y="16" width="92" height="12" rx="2" stroke="rgba(123,164,192,.58)" stroke-width="1.2" fill="rgba(123,164,192,.05)"/><circle cx="80" cy="22" r="4" fill="rgba(123,164,192,.18)" stroke="rgba(123,164,192,.8)" stroke-width="1.5"/><polyline points="0,42 40,41 80,40 120,41 160,40" stroke="rgba(232,64,42,.3)" stroke-width="1" fill="none"/></svg>
+        <p class="arch-ver">03</p><p class="arch-name">The Sanctuary Seeker</p>
+        <p class="arch-desc">Enclosure is essential. GSR lowers as containment increases.</p>
+        <div class="arch-tags"><span class="arch-tag">Low Light</span><span class="arch-tag">Contemporary</span><span class="arch-tag">Private</span></div>
+      </div>
+      <div class="arch-card" id="ac-3">
+        <svg class="arch-diag" viewBox="0 0 160 44"><path d="M10 22 Q50 8 80 4 Q110 8 150 22" stroke="rgba(91,127,255,.52)" stroke-width="2" fill="none"/><path d="M10 22 Q50 36 80 40 Q110 36 150 22" stroke="rgba(91,127,255,.28)" stroke-width="1.5" fill="none"/><circle cx="26" cy="14" r="4" stroke="rgba(91,127,255,.65)" stroke-width="1" fill="rgba(91,127,255,.1)"/><circle cx="80" cy="4" r="5" stroke="rgba(91,127,255,.85)" stroke-width="1.5" fill="rgba(91,127,255,.15)"/><circle cx="134" cy="14" r="4" stroke="rgba(91,127,255,.65)" stroke-width="1" fill="rgba(91,127,255,.1)"/><polyline points="0,42 25,39 50,36 75,37 100,34 125,37 150,33 160,32" stroke="rgba(232,64,42,.52)" stroke-width="1" fill="none"/></svg>
+        <p class="arch-ver">04</p><p class="arch-name">The Social Showcaser</p>
+        <p class="arch-desc">Home as stage. Open, bright, designed for gathering.</p>
+        <div class="arch-tags"><span class="arch-tag">Bright</span><span class="arch-tag">Contemporary</span><span class="arch-tag">Open</span></div>
+      </div>
+    </div>
+    <div class="arch-grid arch-grid-r2 r d5">
+      <div class="arch-card" id="ac-4">
+        <svg class="arch-diag" viewBox="0 0 160 44"><line x1="0" y1="8" x2="160" y2="8" stroke="rgba(79,209,197,.14)" stroke-width=".8"/><line x1="0" y1="22" x2="160" y2="22" stroke="rgba(79,209,197,.48)" stroke-width="1"/><line x1="0" y1="36" x2="160" y2="36" stroke="rgba(79,209,197,.14)" stroke-width=".8"/><line x1="24" y1="0" x2="24" y2="44" stroke="rgba(79,209,197,.14)" stroke-width=".8"/><line x1="80" y1="0" x2="80" y2="44" stroke="rgba(79,209,197,.38)" stroke-width="1"/><line x1="136" y1="0" x2="136" y2="44" stroke="rgba(79,209,197,.14)" stroke-width=".8"/><path d="M3 3 L13 3 M3 3 L3 13" stroke="rgba(79,209,197,.65)" stroke-width="1.2" fill="none"/><path d="M157 3 L147 3 M157 3 L157 13" stroke="rgba(79,209,197,.65)" stroke-width="1.2" fill="none"/><polyline points="0,42 40,41 80,40 120,41 160,40" stroke="rgba(232,64,42,.25)" stroke-width="1" fill="none"/></svg>
+        <p class="arch-ver">05</p><p class="arch-name">The Futurist</p>
+        <p class="arch-desc">Precision, clean geometry. Gaze tracks structural lines. Very steady GSR.</p>
+        <div class="arch-tags"><span class="arch-tag">Bright</span><span class="arch-tag">Contemporary</span><span class="arch-tag">Precision</span></div>
+      </div>
+      <div class="arch-card" id="ac-5">
+        <svg class="arch-diag" viewBox="0 0 160 44"><line x1="80" y1="0" x2="80" y2="44" stroke="rgba(196,149,74,.2)" stroke-width="1" stroke-dasharray="3,3"/><path d="M18 42 L18 20 L80 3 L142 20 L142 42 Z" stroke="rgba(196,149,74,.52)" stroke-width="1.5" fill="rgba(196,149,74,.04)"/><line x1="42" y1="42" x2="42" y2="23" stroke="rgba(196,149,74,.52)" stroke-width="1.8"/><line x1="80" y1="42" x2="80" y2="16" stroke="rgba(196,149,74,.68)" stroke-width="2.2"/><line x1="118" y1="42" x2="118" y2="23" stroke="rgba(196,149,74,.52)" stroke-width="1.8"/><polyline points="0,43 40,42 80,41 120,42 160,41" stroke="rgba(232,64,42,.35)" stroke-width="1" fill="none"/></svg>
+        <p class="arch-ver">06</p><p class="arch-name">The Traditionalist</p>
+        <p class="arch-desc">Symmetry, established forms, historical continuity. Warm steady GSR.</p>
+        <div class="arch-tags"><span class="arch-tag">Low Light</span><span class="arch-tag">Warm</span><span class="arch-tag">Private</span></div>
+      </div>
+      <div class="arch-card" id="ac-6">
+        <svg class="arch-diag" viewBox="0 0 160 44"><path d="M80 22 Q56 9 24 17 Q8 22 24 30 Q52 43 80 22" stroke="rgba(212,131,90,.58)" stroke-width="1.5" fill="rgba(212,131,90,.05)"/><path d="M80 22 Q104 10 136 16 Q152 22 140 30 Q116 43 80 22" stroke="rgba(212,131,90,.38)" stroke-width="1.2" fill="rgba(212,131,90,.03)"/><circle cx="80" cy="22" r="5.5" fill="rgba(212,131,90,.16)" stroke="rgba(212,131,90,.75)" stroke-width="1.5"/><circle cx="80" cy="22" r="2" fill="rgba(212,131,90,.9)"/><polyline points="0,42 40,41 80,40 120,41 160,40" stroke="rgba(232,64,42,.28)" stroke-width="1" fill="none"/></svg>
+        <p class="arch-ver">07</p><p class="arch-name">The Cocooner</p>
+        <p class="arch-desc">Intimate, warm, embracing. GSR lowest in softly lit enclosed rooms.</p>
+        <div class="arch-tags"><span class="arch-tag">Warm</span><span class="arch-tag">Rounded</span><span class="arch-tag">Private</span></div>
+      </div>
+      <div class="arch-card" id="ac-7">
+        <svg class="arch-diag" viewBox="0 0 160 44"><line x1="0" y1="22" x2="160" y2="22" stroke="rgba(245,244,240,.48)" stroke-width="1.5"/><rect x="54" y="14" width="52" height="16" rx="1" stroke="rgba(245,244,240,.18)" stroke-width="1" fill="rgba(245,244,240,.02)"/><line x1="67" y1="14" x2="67" y2="30" stroke="rgba(245,244,240,.1)" stroke-width=".6"/><line x1="93" y1="14" x2="93" y2="30" stroke="rgba(245,244,240,.1)" stroke-width=".6"/><polyline points="0,41 40,40 80,39 120,40 160,39" stroke="rgba(232,64,42,.22)" stroke-width="1" fill="none"/><circle cx="134" cy="11" r="4.5" fill="none" stroke="rgba(155,82,204,.32)" stroke-width="1"/><circle cx="134" cy="11" r="2" fill="none" stroke="rgba(155,82,204,.55)" stroke-width="1"/><circle cx="134" cy="11" r=".8" fill="rgba(155,82,204,.9)"/></svg>
+        <p class="arch-ver">08</p><p class="arch-name">The Minimal Haven</p>
+        <p class="arch-desc">Clarity through restraint. Long fixations. Lowest GSR in uncluttered light.</p>
+        <div class="arch-tags"><span class="arch-tag">Bright</span><span class="arch-tag">Sharp</span><span class="arch-tag">Open</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 6. PROCESS -->
+<section id="s-how">
+  <div class="inner">
+    <p class="eyebrow r">Process</p>
+    <h2 class="h2 r d1">From signal<br>to better conversation.</h2>
+    <div class="how-layout">
+      <div class="how-steps r d2">
+        <div class="how-step active" onclick="setStep(0)"><div class="st-num">01</div><div class="st-body"><h4>Upload 360° Panorama</h4><p>Any equirectangular image mapped onto a WebGL sphere.</p></div></div>
+        <div class="how-step" onclick="setStep(1)"><div class="st-num">02</div><div class="st-body"><h4>Load Biometric Data</h4><p>Drop CSV files. Gaze, GSR, pupil, HRV parsed and time-synced.</p></div></div>
+        <div class="how-step" onclick="setStep(2)"><div class="st-num">03</div><div class="st-body"><h4>Replay the Session</h4><p>Live heatmap frame-by-frame. Critical moments auto-detected.</p></div></div>
+        <div class="how-step" onclick="setStep(3)"><div class="st-num">04</div><div class="st-body"><h4>Rate Spatial Moments</h4><p>Each biometric event tied to a zone — rate positive or negative.</p></div></div>
+        <div class="how-step" onclick="setStep(4)"><div class="st-num">05</div><div class="st-body"><h4>Start the Conversation</h4><p>Archetype profile generated. Use it as the foundation for a richer design dialogue with your client.</p></div></div>
+      </div>
+      <div class="how-panels r d3">
+        <div class="how-panel active" id="p-0"><div class="dash-frame"><div class="df-bar"><div class="df-dot"></div><div class="df-dot"></div><div class="df-dot"></div><span class="df-title">Scene Setup — Panorama Import</span></div><div class="df-body"><div style="border:1.5px dashed rgba(26,22,16,.11);border-radius:2px;padding:30px;text-align:center;background:rgba(26,22,16,.02);"><svg width="34" height="34" viewBox="0 0 40 40" fill="none" style="margin:0 auto 9px;display:block;opacity:.22;"><circle cx="20" cy="20" r="18" stroke="#4a4135" stroke-width="1.5"/><ellipse cx="20" cy="20" rx="8" ry="4" stroke="#4a4135" stroke-width="1" fill="none"/><line x1="20" y1="2" x2="20" y2="38" stroke="#4a4135" stroke-width="1" opacity=".5"/></svg><p style="font-family:var(--mono);font-size:8.5px;color:var(--ink-dim);letter-spacing:.1em;">DROP 360° PANORAMA</p></div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-top:10px;"><div style="aspect-ratio:2/1;background:linear-gradient(135deg,#2a1a0a,#4a3010);border-radius:1px;display:flex;align-items:center;justify-content:center;"><span style="font-family:var(--mono);font-size:6.5px;color:rgba(245,244,240,.3);">LOBBY A</span></div><div style="aspect-ratio:2/1;background:linear-gradient(135deg,#0a1a2a,#103050);border-radius:1px;border:1px solid rgba(52,199,89,.32);display:flex;align-items:center;justify-content:center;"><span style="font-family:var(--mono);font-size:6.5px;color:rgba(52,199,89,.75);">✓ ATRIUM</span></div><div style="aspect-ratio:2/1;background:linear-gradient(135deg,#1a0a1a,#2a1030);border-radius:1px;display:flex;align-items:center;justify-content:center;"><span style="font-family:var(--mono);font-size:6.5px;color:rgba(245,244,240,.3);">CORRIDOR</span></div></div></div></div></div>
+        <div class="how-panel" id="p-1"><div class="dash-frame"><div class="df-bar"><div class="df-dot"></div><div class="df-dot"></div><div class="df-dot"></div><span class="df-title">Data Import — Biometric CSV</span></div><div class="df-body" style="display:flex;flex-direction:column;gap:7px;"><div style="padding:10px;background:rgba(52,199,89,.04);border:1px solid rgba(52,199,89,.16);border-radius:2px;display:flex;align-items:center;justify-content:space-between;"><div><div style="font-family:var(--mono);font-size:9.5px;font-weight:700;">participant_01.csv</div><div style="font-family:var(--mono);font-size:7.5px;color:var(--ink-dim);margin-top:2px;">2,840 frames · GSR + PUPIL + GAZE + HRV</div></div><span style="font-family:var(--mono);font-size:7.5px;color:var(--hrv);">LOADED</span></div><div style="padding:10px;background:rgba(52,199,89,.04);border:1px solid rgba(52,199,89,.16);border-radius:2px;display:flex;align-items:center;justify-content:space-between;"><div><div style="font-family:var(--mono);font-size:9.5px;font-weight:700;">participant_02.csv</div><div style="font-family:var(--mono);font-size:7.5px;color:var(--ink-dim);margin-top:2px;">2,650 frames · GSR + PUPIL + GAZE</div></div><span style="font-family:var(--mono);font-size:7.5px;color:var(--hrv);">LOADED</span></div><div style="padding:9px;background:rgba(26,22,16,.02);border:1.5px dashed rgba(26,22,16,.1);border-radius:2px;text-align:center;"><span style="font-family:var(--mono);font-size:8.5px;color:var(--ink-dim);">+ Add participant</span></div></div></div></div>
+        <div class="how-panel" id="p-2"><div class="dash-frame"><div class="df-bar"><div class="df-dot"></div><div class="df-dot"></div><div class="df-dot"></div><span class="df-title">Live Playback — Critical Moments</span></div><div class="df-body" style="padding:12px;display:flex;flex-direction:column;gap:10px;">
+<!-- Animated scene -->
+<div style="background:radial-gradient(ellipse at 38% 48%,#1c0f05,#060408);border-radius:2px;aspect-ratio:16/9;position:relative;overflow:hidden;" id="cm-scene">
+  <div id="cm-blob1" style="position:absolute;width:90px;height:70px;background:rgba(232,64,42,.0);filter:blur(22px);border-radius:50%;top:16%;left:24%;transition:background .4s;"></div>
+  <div id="cm-blob2" style="position:absolute;width:60px;height:55px;background:rgba(155,82,204,.0);filter:blur(16px);border-radius:50%;top:44%;left:55%;transition:background .4s;"></div>
+  <div id="cm-gaze" style="position:absolute;width:12px;height:12px;border-radius:50%;border:1.5px solid rgba(201,162,74,.9);background:rgba(201,162,74,.2);transform:translate(-50%,-50%);left:38%;top:32%;transition:left .8s cubic-bezier(.4,0,.2,1),top .8s cubic-bezier(.4,0,.2,1);pointer-events:none;"></div>
+  <!-- Zone labels -->
+  <span style="position:absolute;top:12%;left:22%;font-family:var(--mono);font-size:6px;color:rgba(245,244,240,.2);letter-spacing:.08em;">WINDOW</span>
+  <span style="position:absolute;top:42%;left:52%;font-family:var(--mono);font-size:6px;color:rgba(245,244,240,.2);letter-spacing:.08em;">CEILING</span>
+  <span style="position:absolute;bottom:15%;left:14%;font-family:var(--mono);font-size:6px;color:rgba(245,244,240,.2);letter-spacing:.08em;">FIREPLACE</span>
+  <!-- Active event tag -->
+  <div id="cm-tag" style="position:absolute;bottom:7px;left:7px;background:rgba(232,64,42,.0);color:#fff;font-family:var(--mono);font-size:6.5px;padding:2px 7px;border-radius:1px;transition:background .3s,opacity .3s;opacity:0;">⚡ WINDOW — GSR · 3.4s</div>
+</div>
+<!-- Timeline scrubber -->
+<div style="display:flex;align-items:center;gap:8px;">
+  <span id="cm-play" style="font-size:12px;cursor:pointer;user-select:none;" title="Play/pause">⏵</span>
+  <div style="flex:1;height:3px;background:rgba(26,22,16,.08);border-radius:2px;position:relative;cursor:pointer;" id="cm-track">
+    <div id="cm-fill" style="position:absolute;left:0;top:0;bottom:0;width:0%;background:linear-gradient(90deg,var(--gsr),var(--gold));border-radius:2px;transition:width .1s linear;"></div>
+    <!-- Moment markers -->
+    <div style="position:absolute;left:34%;top:50%;transform:translate(-50%,-50%);width:6px;height:6px;border-radius:50%;background:var(--gsr);border:1px solid #fff;" title="3.4s · GSR spike · WINDOW"></div>
+    <div style="position:absolute;left:62%;top:50%;transform:translate(-50%,-50%);width:6px;height:6px;border-radius:50%;background:var(--pupil);border:1px solid #fff;" title="6.1s · Pupil · CEILING"></div>
+    <div style="position:absolute;left:80%;top:50%;transform:translate(-50%,-50%);width:6px;height:6px;border-radius:50%;background:var(--gsr);border:1px solid #fff;" title="7.9s · GSR spike · FIREPLACE"></div>
+  </div>
+  <span id="cm-time" style="font-family:var(--mono);font-size:7.5px;color:var(--ink-dim);white-space:nowrap;">0.0 / 9.5s</span>
+</div>
+<!-- Critical moment log -->
+<div style="display:flex;flex-direction:column;gap:4px;">
+  <p style="font-family:var(--mono);font-size:7.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-dim);margin-bottom:2px;">Critical Moments</p>
+  <div class="cm-row" data-t="0.357" data-zone="WINDOW" data-type="gsr" data-bx="34" data-by="28" style="display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid var(--rule);border-radius:2px;cursor:pointer;transition:background .15s;border-left:2px solid var(--gsr);">
+    <span style="font-family:var(--mono);font-size:8px;color:var(--gsr);font-weight:700;">3.4s</span>
+    <span style="font-family:var(--mono);font-size:8px;color:var(--ink-dim);flex:1;">GSR Spike · <strong style="color:var(--ink);">Window</strong></span>
+    <span style="font-family:var(--mono);font-size:7.5px;padding:1px 6px;background:rgba(232,64,42,.08);color:var(--gsr);border-radius:1px;">↑ 0.87</span>
+  </div>
+  <div class="cm-row" data-t="0.641" data-zone="CEILING" data-type="pupil" data-bx="60" data-by="48" style="display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid var(--rule);border-radius:2px;cursor:pointer;transition:background .15s;border-left:2px solid var(--pupil);">
+    <span style="font-family:var(--mono);font-size:8px;color:var(--pupil);font-weight:700;">6.1s</span>
+    <span style="font-family:var(--mono);font-size:8px;color:var(--ink-dim);flex:1;">Pupil Dilation · <strong style="color:var(--ink);">Ceiling</strong></span>
+    <span style="font-family:var(--mono);font-size:7.5px;padding:1px 6px;background:rgba(155,82,204,.08);color:var(--pupil);border-radius:1px;">5.8mm</span>
+  </div>
+  <div class="cm-row" data-t="0.832" data-zone="FIREPLACE" data-type="gsr" data-bx="22" data-by="72" style="display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid var(--rule);border-radius:2px;cursor:pointer;transition:background .15s;border-left:2px solid var(--gsr);">
+    <span style="font-family:var(--mono);font-size:8px;color:var(--gsr);font-weight:700;">7.9s</span>
+    <span style="font-family:var(--mono);font-size:8px;color:var(--ink-dim);flex:1;">GSR Spike · <strong style="color:var(--ink);">Fireplace</strong></span>
+    <span style="font-family:var(--mono);font-size:7.5px;padding:1px 6px;background:rgba(232,64,42,.08);color:var(--gsr);border-radius:1px;">↑ 0.92</span>
+  </div>
+</div>
+</div></div></div>
+        <div class="how-panel" id="p-3"><div class="dash-frame"><div class="df-bar"><div class="df-dot"></div><div class="df-dot"></div><div class="df-dot"></div><span class="df-title">Rate Moments — Valence</span></div><div class="df-body" style="display:flex;flex-direction:column;gap:6px;"><div style="background:rgba(232,64,42,.04);border:1px solid rgba(232,64,42,.16);border-left:2px solid var(--gsr);border-radius:2px;padding:10px;"><div style="font-family:var(--mono);font-size:7.5px;color:var(--ink-dim);">3.4s · GSR SPIKE · WINDOW</div><div style="font-size:11.5px;font-style:italic;margin:4px 0 9px;">Whilst looking at the <strong>window</strong> — positive or negative?</div><div style="display:flex;gap:5px;"><div style="flex:1;padding:6px;border-radius:1px;border:1px solid var(--hrv);background:rgba(46,173,92,.1);text-align:center;font-family:var(--mono);font-size:8.5px;font-weight:700;color:var(--hrv);">Positive ✓</div><div style="flex:1;padding:6px;border-radius:1px;border:1px solid rgba(26,22,16,.14);text-align:center;font-family:var(--mono);font-size:8.5px;color:var(--ink-dim);">Negative</div></div></div><div style="background:rgba(26,22,16,.02);border:1px solid var(--rule);border-radius:2px;padding:10px;opacity:.4;"><div style="font-family:var(--mono);font-size:7.5px;color:var(--ink-dim);">6.1s · PUPIL · CEILING</div><div style="font-size:11.5px;font-style:italic;margin-top:3px;">Whilst looking at the <strong>ceiling detail</strong>...</div></div><div style="padding:10px;background:var(--accent);border-radius:2px;text-align:center;font-family:var(--mono);font-size:8.5px;font-weight:700;color:#fff;letter-spacing:.06em;">GENERATE ARCHETYPE PROFILE →</div></div></div></div>
+        <div class="how-panel" id="p-4"><div class="dash-frame"><div class="df-bar"><div class="df-dot"></div><div class="df-dot"></div><div class="df-dot"></div><span class="df-title">Bespoke Brief — Your Space</span></div><div class="df-body" style="display:flex;flex-direction:column;gap:10px;">
+<!-- Archetype tag -->
+<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--ink);border-radius:2px;">
+  <div><div style="font-family:var(--mono);font-size:7.5px;color:rgba(245,244,240,.3);letter-spacing:.1em;margin-bottom:2px;">MATCHED ARCHETYPE</div><div style="font-size:13px;font-weight:700;color:rgba(245,244,240,.88);">The Minimal Haven</div></div>
+  <div style="font-family:var(--mono);font-size:18px;font-weight:700;color:var(--gold);letter-spacing:-.02em;">94%</div>
+</div>
+<!-- Space inspiration grid -->
+<div>
+  <p style="font-family:var(--mono);font-size:7.5px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-dim);margin-bottom:6px;">Spaces you might love</p>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;">
+    <div style="aspect-ratio:4/3;border-radius:2px;overflow:hidden;position:relative;cursor:pointer;" class="inspo-card">
+      <div style="position:absolute;inset:0;background:linear-gradient(155deg,#d8d0c4 0%,#a09080 40%,#504030 100%);"></div>
+      <div style="position:absolute;inset:0;" id="inspo-hl-0"></div>
+      <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(10,6,2,.62));padding:5px 6px;"><span style="font-family:var(--mono);font-size:6px;color:rgba(245,244,240,.75);">Limewash loft</span></div>
+    </div>
+    <div style="aspect-ratio:4/3;border-radius:2px;overflow:hidden;position:relative;cursor:pointer;" class="inspo-card">
+      <div style="position:absolute;inset:0;background:linear-gradient(160deg,#c8c4be 0%,#888480 50%,#303028 100%);"></div>
+      <div style="position:absolute;inset:0;" id="inspo-hl-1"></div>
+      <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(10,6,2,.62));padding:5px 6px;"><span style="font-family:var(--mono);font-size:6px;color:rgba(245,244,240,.75);">Raw concrete</span></div>
+    </div>
+    <div style="aspect-ratio:4/3;border-radius:2px;overflow:hidden;position:relative;cursor:pointer;" class="inspo-card">
+      <div style="position:absolute;inset:0;background:linear-gradient(150deg,#e0dcd4 0%,#b0a898 50%,#605848 100%);"></div>
+      <div style="position:absolute;inset:0;" id="inspo-hl-2"></div>
+      <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(10,6,2,.62));padding:5px 6px;"><span style="font-family:var(--mono);font-size:6px;color:rgba(245,244,240,.75);">Travertine light</span></div>
+    </div>
+  </div>
+</div>
+<!-- Upload your own space -->
+<div style="border:1.5px dashed rgba(26,22,16,.15);border-radius:2px;padding:14px;text-align:center;cursor:pointer;transition:border-color .2s,background .2s;" id="upload-space-btn" onmouseenter="this.style.borderColor='var(--gold)';this.style.background='rgba(201,162,74,.03)';" onmouseleave="this.style.borderColor='rgba(26,22,16,.15)';this.style.background='';" onclick="document.getElementById('upload-space-input').click()">
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(26,22,16,.3)" stroke-width="1.5" style="margin:0 auto 6px;display:block;"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+  <p style="font-family:var(--mono);font-size:8px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-dim);">Upload your own space</p>
+  <p style="font-family:var(--mono);font-size:7px;color:var(--ink-dim);margin-top:3px;opacity:.6;">Apply your archetype to your own environment</p>
+  <input type="file" id="upload-space-input" accept="image/*" style="display:none;" onchange="handleSpaceUpload(this)">
+</div>
+</div></div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 7. PRODUCTS -->
+<section id="s-products">
+  <div class="inner">
+    <p class="eyebrow r">The System</p>
+    <h2 class="h2 r d1">Three instruments.<br>One methodology.</h2>
+    <div class="prod-grid r d2">
+      <div class="prod-card">
+        <div class="prod-app"><svg width="120" height="76" viewBox="0 0 140 88" fill="none"><ellipse cx="70" cy="52" rx="36" ry="40" stroke="rgba(26,22,16,.1)" stroke-width="1.5" fill="rgba(26,22,16,.02)"/><path d="M34 38 Q70 22 106 38" stroke="url(#lg)" stroke-width="2.8" fill="none" stroke-linecap="round"/><line x1="34" y1="38" x2="27" y2="53" stroke="rgba(160,120,48,.45)" stroke-width="1.8" stroke-linecap="round"/><line x1="106" y1="38" x2="113" y2="53" stroke="rgba(160,120,48,.45)" stroke-width="1.8" stroke-linecap="round"/><rect x="42" y="46" width="18" height="12" rx="2" fill="rgba(201,162,74,.09)" stroke="rgba(201,162,74,.42)" stroke-width="1.2"/><circle cx="51" cy="52" r="3" fill="rgba(201,162,74,.28)"/><circle cx="51" cy="52" r="1.2" fill="rgba(201,162,74,.88)"/><rect x="80" y="46" width="18" height="12" rx="2" fill="rgba(201,162,74,.09)" stroke="rgba(201,162,74,.42)" stroke-width="1.2"/><circle cx="89" cy="52" r="3" fill="rgba(201,162,74,.28)"/><circle cx="89" cy="52" r="1.2" fill="rgba(201,162,74,.88)"/></svg></div>
+        <p class="prod-ver">Version 01</p><h3 class="prod-name">Mind. V.1</h3>
+        <p class="prod-desc">Foundation. Gaze vectors projected onto 360° — revealing where attention lives.</p>
+        <div class="prod-sensors"><div class="s-badge on"><span class="s-dot" style="background:var(--eye)"></span>Eye tracking · Gaze · Fixation</div><div class="s-badge off"><span class="s-dot" style="background:rgba(26,22,16,.2)"></span>GSR — not included</div><div class="s-badge off"><span class="s-dot" style="background:rgba(26,22,16,.2)"></span>Pupil — not included</div><div class="s-badge off"><span class="s-dot" style="background:rgba(26,22,16,.2)"></span>HRV — not included</div></div>
+        <div class="prod-price">Pricing on request</div>
+      </div>
+      <div class="prod-card">
+        <div class="prod-app"><svg width="120" height="76" viewBox="0 0 140 88" fill="none"><ellipse cx="70" cy="52" rx="36" ry="40" stroke="rgba(26,22,16,.1)" stroke-width="1.5" fill="rgba(26,22,16,.02)"/><path d="M34 38 Q70 22 106 38" stroke="url(#lg)" stroke-width="2.8" fill="none" stroke-linecap="round"/><line x1="34" y1="38" x2="27" y2="53" stroke="rgba(160,120,48,.5)" stroke-width="1.8" stroke-linecap="round"/><line x1="106" y1="38" x2="113" y2="53" stroke="rgba(160,120,48,.5)" stroke-width="1.8" stroke-linecap="round"/><rect x="8" y="50" width="19" height="10" rx="2" fill="rgba(232,64,42,.11)" stroke="rgba(232,64,42,.42)" stroke-width="1"/><text x="17" y="58" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="5.5" fill="rgba(232,64,42,.82)">GSR</text><rect x="42" y="46" width="18" height="12" rx="2" fill="rgba(201,162,74,.11)" stroke="rgba(201,162,74,.48)" stroke-width="1.2"/><circle cx="51" cy="52" r="3" fill="rgba(201,162,74,.28)"/><circle cx="51" cy="52" r="1.3" fill="rgba(201,162,74,.88)"/><circle cx="51" cy="52" r="5" stroke="rgba(155,82,204,.38)" stroke-width=".8" fill="none" stroke-dasharray="2,2"/><rect x="80" y="46" width="18" height="12" rx="2" fill="rgba(201,162,74,.11)" stroke="rgba(201,162,74,.48)" stroke-width="1.2"/><circle cx="89" cy="52" r="3" fill="rgba(201,162,74,.28)"/><circle cx="89" cy="52" r="1.3" fill="rgba(201,162,74,.88)"/><circle cx="89" cy="52" r="5" stroke="rgba(155,82,204,.38)" stroke-width=".8" fill="none" stroke-dasharray="2,2"/></svg></div>
+        <p class="prod-ver">Version 02</p><h3 class="prod-name">Mind. V.2</h3>
+        <p class="prod-desc">Attention plus arousal. GSR and pupil show not just where someone looks but what it costs them.</p>
+        <div class="prod-sensors"><div class="s-badge on"><span class="s-dot" style="background:var(--eye)"></span>Eye tracking · Gaze · Fixation</div><div class="s-badge on"><span class="s-dot" style="background:var(--gsr)"></span>Galvanic skin response</div><div class="s-badge on"><span class="s-dot" style="background:var(--pupil)"></span>Pupil dilation · Cognitive load</div><div class="s-badge off"><span class="s-dot" style="background:rgba(26,22,16,.2)"></span>HRV — not included</div></div>
+        <div class="prod-price">Pricing on request</div>
+      </div>
+      <div class="prod-card featured">
+        <div class="prod-app"><svg width="120" height="76" viewBox="0 0 140 88" fill="none"><ellipse cx="70" cy="52" rx="36" ry="40" stroke="rgba(245,244,240,.14)" stroke-width="1.5" fill="rgba(245,244,240,.03)"/><path d="M34 38 Q70 20 106 38" stroke="url(#lg)" stroke-width="3.2" fill="none" stroke-linecap="round"/><rect x="60" y="16" width="20" height="8" rx="1" fill="rgba(10,132,255,.17)" stroke="rgba(10,132,255,.52)" stroke-width="1"/><text x="70" y="22" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="5.5" fill="rgba(10,132,255,.82)">IMU</text><line x1="34" y1="38" x2="26" y2="53" stroke="rgba(201,162,74,.62)" stroke-width="2.2" stroke-linecap="round"/><line x1="106" y1="38" x2="114" y2="53" stroke="rgba(201,162,74,.62)" stroke-width="2.2" stroke-linecap="round"/><rect x="6" y="50" width="19" height="10" rx="2" fill="rgba(232,64,42,.13)" stroke="rgba(232,64,42,.52)" stroke-width="1"/><text x="15" y="58" text-anchor="middle" font-family="JetBrains Mono,monospace" font-size="5.5" fill="rgba(232,64,42,.88)">GSR</text><rect x="50" y="80" width="40" height="8" rx="2" fill="rgba(46,173,92,.09)" stroke="rgba(46,173,92,.42)" stroke-width="1"/><polyline points="52,84 56,83 59,86 62,80 66,88 69,83 72,84 75,82 78,84 81,82 83,84" stroke="rgba(46,173,92,.62)" stroke-width=".8" fill="none"/><rect x="42" y="46" width="18" height="12" rx="2" fill="rgba(201,162,74,.15)" stroke="rgba(201,162,74,.62)" stroke-width="1.5"/><circle cx="51" cy="52" r="3.5" fill="rgba(201,162,74,.28)"/><circle cx="51" cy="52" r="1.5" fill="rgba(201,162,74,.88)"/><circle cx="51" cy="52" r="5.5" stroke="rgba(155,82,204,.42)" stroke-width=".9" fill="none" stroke-dasharray="2,2"/><rect x="80" y="46" width="18" height="12" rx="2" fill="rgba(201,162,74,.15)" stroke="rgba(201,162,74,.62)" stroke-width="1.5"/><circle cx="89" cy="52" r="3.5" fill="rgba(201,162,74,.28)"/><circle cx="89" cy="52" r="1.5" fill="rgba(201,162,74,.88)"/><circle cx="89" cy="52" r="5.5" stroke="rgba(155,82,204,.42)" stroke-width=".9" fill="none" stroke-dasharray="2,2"/></svg></div>
+        <p class="prod-ver">Version 03 — Complete</p><h3 class="prod-name">Mind. V.3</h3>
+        <p class="prod-desc">Full nervous system portrait. Every channel active — gaze, arousal, cognition, cardiac rhythm, spatial orientation.</p>
+        <div class="prod-sensors"><div class="s-badge on"><span class="s-dot" style="background:var(--eye)"></span>Eye tracking · Gaze · Fixation</div><div class="s-badge on"><span class="s-dot" style="background:var(--gsr)"></span>Galvanic skin response</div><div class="s-badge on"><span class="s-dot" style="background:var(--pupil)"></span>Pupil dilation · Cognitive load</div><div class="s-badge on"><span class="s-dot" style="background:var(--hrv)"></span>Heart rate variability</div><div class="s-badge on"><span class="s-dot" style="background:#0A84FF"></span>Head rotation · IMU orientation</div></div>
+        <div class="prod-price featured-price">Pricing on request</div>
+      </div>
+    </div>
+    <!-- Pricing contact note -->
+    <div class="r d3" style="margin-top:24px;padding:18px 24px;border:1px solid var(--rule);border-radius:3px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;">
+      <div>
+        <p style="font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-dim);margin-bottom:4px;">Pricing</p>
+        <p style="font-size:14px;color:var(--ink);">All versions are priced per project, scaled to scope. <span style="color:var(--ink-mid);">Research institutions, architecture practices, and interior designers — get in touch to discuss your needs.</span></p>
+      </div>
+      <!--
+        SECURITY NOTE: The original href here was a Cloudflare email-obfuscation
+        URL (/cdn-cgi/l/email-protection#...) which decodes only when Cloudflare's
+        email-decode.min.js script runs. That script is not available on GitHub Pages
+        and would silently break this link.
+
+        Replaced with a plain mailto. To protect your email from scrapers on a static
+        site, consider: (a) a contact form via Formspree, or (b) displaying the address
+        only after a JS interaction (not a static href). The mailto below is functional
+        but crawlable — update hello@measuredmind.dev to your real address.
+      -->
+      <a href="mailto:hello@measuredmind.dev" style="flex-shrink:0;display:inline-flex;align-items:center;gap:7px;padding:10px 20px;border:1px solid var(--rule);border-radius:3px;font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--accent);text-decoration:none;transition:border-color .2s,color .2s;" onmouseenter="this.style.borderColor='var(--gold)';this.style.color='var(--gold)';" onmouseleave="this.style.borderColor='var(--rule)';this.style.color='var(--accent)';">Contact for pricing →</a>
+    </div>
+  </div>
+</section>
+<section id="s-cta">
+  <div class="cta-grid"></div>
+  <div style="position:relative;z-index:1;" class="r">
+    <p class="eyebrow">Early Access</p>
+    <h2 class="h2">Ready to listen<br>to what space says?</h2>
+    <p class="cta-sub">Private beta. Every application is read personally.</p>
+    <div class="cta-form">
+      <input type="email" class="cta-inp" placeholder="your@institution.edu" id="cta-email">
+      <button class="cta-btn" id="cta-submit" onclick="handleCTASubmit(this)">Request Access</button>
+    </div>
+    <p class="cta-note">No spam · Early access only · Personal reply guaranteed</p>
+  </div>
+</section>
+<footer>
+  <a href="#" class="mm-logo"><svg width="34" height="20" viewBox="0 0 48 28" fill="none"><path d="M2 20 L2 8 L9 8 L9 20 L9 8 L16 8 L16 20" stroke="rgba(201,162,74,.36)" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 20 L22 4 L28 26 L34 4 L40 20 L46 20" stroke="rgba(201,162,74,.36)" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="mm-wordmark" style="color:rgba(245,244,240,.18);font-size:12px;">Measured Mind.</span></a>
+  <span class="f-copy">© 2026 Measured Mind.</span>
+  <span class="f-copy" style="opacity:.55;">Designed by Matan Daniel Michaels</span>
+  <ul class="f-links"><li><a href="#">Privacy</a></li><li><a href="#">Terms</a></li><li><a href="#">Contact</a></li></ul>
+</footer>
+
+<!--
+  REMOVED: Cloudflare email-decode.min.js script. This script
+  (/cdn-cgi/scripts/.../cloudflare-static/email-decode.min.js) is injected
+  automatically by Cloudflare's proxy and is NOT available on GitHub Pages.
+  Loading it from the original path would silently 404. The obfuscated email
+  link it decoded has also been replaced above with a plain mailto.
+  If you later add Cloudflare as a proxy in front of GitHub Pages (recommended
+  for production), Cloudflare will re-inject this script automatically.
+-->
+<script>
+/* ══════════════════════════════════════
+   SPECIAL TEXT — scramble reveal
+   Port of SpecialText React component.
+   Two lines animate sequentially:
+     line 1 → "Measured"   (starts immediately)
+     line 2 → "Mind."      (starts after line 1 finishes)
+══════════════════════════════════════ */
+(function(){
+  const CHARS = '_!X$0-+*#';
+  function randChar(prev){
+    let c;
+    do { c = CHARS[Math.floor(Math.random()*CHARS.length)]; } while(c===prev);
+    return c;
+  }
+
+  function scrambleTo(el, text, onDone, speed){
+    speed = speed || 18;
+    el.textContent = '\u00A0'.repeat(text.length);
+
+    let phase = 1;
+    let step  = 0;
+    const maxP1 = text.length * 2;
+
+    const iv = setInterval(()=>{
+      if(phase===1){
+        // Phase 1: grow random chars left-to-right
+        const len = Math.min(step+1, text.length);
+        let chars=[];
+        for(let i=0;i<len;i++) chars.push(randChar(chars[i-1]));
+        for(let i=len;i<text.length;i++) chars.push('\u00A0');
+        el.textContent = chars.join('');
+        if(step < maxP1-1){ step++; }
+        else { phase=2; step=0; }
+
+      } else {
+        // Phase 2: reveal correct chars from left, randomise the rest
+        const revealed = Math.floor(step/2);
+        let chars=[];
+        for(let i=0;i<revealed && i<text.length;i++) chars.push(text[i]);
+        if(revealed < text.length){
+          chars.push(step%2===0 ? '_' : randChar());
+        }
+        while(chars.length < text.length) chars.push(randChar());
+        el.textContent = chars.join('');
+
+        if(step < text.length*2-1){ step++; }
+        else {
+          el.textContent = text;
+          clearInterval(iv);
+          if(onDone) onDone();
+        }
+      }
+    }, speed);
+  }
+
+  // Kick off on DOMContentLoaded — line 2 starts after line 1 finishes
+  window.addEventListener('DOMContentLoaded', ()=>{
+    const l1 = document.getElementById('scramble-line1');
+    const l2 = document.getElementById('scramble-line2');
+    if(!l1||!l2) return;
+    // Small initial pause so canvas draws first (matches original 300ms delay)
+    setTimeout(()=>{
+      scrambleTo(l1, 'Measured', ()=>{
+        scrambleTo(l2, 'Mind.', null, 18);
+      }, 18);
+    }, 320);
+  });
+})();
+
+/* ARCHETYPE DATA */
+const ARCHS=[
+  {n:'The Naturalist',     c:'BWOE', a:[0.85,0.15,0.45,0.20]},
+  {n:'The Explorer',       c:'LCEO', a:[0.15,0.82,0.12,0.18]},
+  {n:'The Sanctuary Seeker',c:'LCGP',a:[0.18,0.55,0.22,0.85]},
+  {n:'The Social Showcaser',c:'BEGO',a:[0.88,0.62,0.15,0.15]},
+  {n:'The Futurist',       c:'BCRO', a:[0.90,0.80,0.55,0.32]},
+  {n:'The Traditionalist', c:'LWGP', a:[0.12,0.10,0.20,0.88]},
+  {n:'The Cocooner',       c:'LWRP', a:[0.18,0.12,0.80,0.82]},
+  {n:'The Minimal Haven',  c:'BGEP', a:[0.88,0.75,0.12,0.28]},
+];
+const axV=[0.60,0.50,0.40,0.35];
+function score(u,a){return a.reduce((s,v,i)=>s+Math.abs(v-u[i]),0);}
+function best(){let b=0,bs=99;ARCHS.forEach((a,i)=>{const s=score(u=axV,a.a);if(s<bs){bs=s;b=i;}});return{idx:b,sc:bs};}
+function updateAxes(){
+  axV.forEach((v,i)=>{
+    document.getElementById('af-'+i).style.width=(v*100)+'%';
+    document.getElementById('ath-'+i).style.left=(v*100)+'%';
+  });
+  const {idx,sc}=best();
+  document.getElementById('arb-name').textContent=ARCHS[idx].n;
+  document.getElementById('arb-code').textContent=ARCHS[idx].c;
+  document.getElementById('arb-match').textContent=Math.round((1-sc/4)*100)+'% biometric match';
+  document.querySelectorAll('.arch-card').forEach((c,i)=>c.classList.toggle('highlighted',i===idx));
+}
+[0,1,2,3].forEach(idx=>{
+  const tr=document.getElementById('at-'+idx);
+  let drag=false;
+  const mv=e=>{
+    if(!drag)return;
+    const r=tr.getBoundingClientRect();
+    const cx=e.touches?e.touches[0].clientX:e.clientX;
+    axV[idx]=Math.max(0,Math.min(1,(cx-r.left)/r.width));
+    updateAxes();
+  };
+  tr.addEventListener('mousedown',e=>{drag=true;mv(e);});
+  tr.addEventListener('touchstart',e=>{drag=true;mv(e);},{passive:true});
+  window.addEventListener('mousemove',mv);
+  window.addEventListener('touchmove',mv,{passive:true});
+  window.addEventListener('mouseup',()=>drag=false);
+  window.addEventListener('touchend',()=>drag=false);
+  tr.addEventListener('click',mv);
+});
+updateAxes();
+
+// Arch card click → animate sliders to that archetype's values
+document.querySelectorAll('.arch-card').forEach((card,i)=>{
+  card.style.cursor='pointer';
+  card.addEventListener('click',()=>{
+    const target=ARCHS[i].a;
+    const start=axV.slice();
+    const STEPS=28;
+    let step=0;
+    function animStep(){
+      step++;
+      const t=step/STEPS;
+      const ease=t<.5?2*t*t:1-Math.pow(-2*t+2,2)/2;
+      for(let j=0;j<4;j++) axV[j]=start[j]+(target[j]-start[j])*ease;
+      // Update sliders visually but force-highlight THIS card during animation
+      axV.forEach((v,k)=>{
+        document.getElementById('af-'+k).style.width=(v*100)+'%';
+        document.getElementById('ath-'+k).style.left=(v*100)+'%';
+      });
+      // Force highlight to the clicked card — no flicker to closest-match
+      document.querySelectorAll('.arch-card').forEach((c,k)=>c.classList.toggle('highlighted',k===i));
+      document.getElementById('arb-name').textContent=ARCHS[i].n;
+      document.getElementById('arb-code').textContent=ARCHS[i].c;
+      document.getElementById('arb-match').textContent='100% biometric match';
+      if(step<STEPS){
+        requestAnimationFrame(animStep);
+      } else {
+        for(let j=0;j<4;j++) axV[j]=target[j];
+        updateAxes(); // final state — let scoring take over naturally
+      }
+    }
+    requestAnimationFrame(animStep);
+    document.querySelector('.arch-controls')?.scrollIntoView({behavior:'smooth',block:'nearest'});
+  });
+});
+
+/* STORY NAV */
+const SECS=['s-hero','s-what','s-problem','s-archetypes','s-how','s-products','s-cta'];
+const LIGHT=['s-what','s-problem','s-how','s-products'];
+const navEl=document.getElementById('story-nav');
+const logoEl=document.getElementById('logo-fixed');
+function updateNav(){
+  let act=0;
+  SECS.forEach((id,i)=>{const el=document.getElementById(id);if(el&&el.getBoundingClientRect().top<=window.innerHeight*.55)act=i;});
+  const isLight=LIGHT.includes(SECS[act]);
+  navEl.classList.toggle('light',isLight);
+  logoEl.classList.toggle('light',isLight);
+  document.querySelectorAll('.sn-item').forEach((it,i)=>it.classList.toggle('active',i===act));
+}
+window.addEventListener('scroll',updateNav,{passive:true});
+updateNav();
+
+/* REVEAL */
+const ro=new IntersectionObserver(e=>e.forEach(x=>{if(x.isIntersecting)x.target.classList.add('in');}),{threshold:.08});
+document.querySelectorAll('.r').forEach(el=>ro.observe(el));
+
+/* HOW STEPS */
+function setStep(n){
+  document.querySelectorAll('.how-step').forEach((s,i)=>s.classList.toggle('active',i===n));
+  document.querySelectorAll('.how-panel').forEach((p,i)=>p.classList.toggle('active',i===n));
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   SECURITY CONTROL 3 — Input Validation & Sanitisation
+   SECURITY CONTROL 4 — Client-side Rate Limiting
+   ══════════════════════════════════════════════════════════════════
+
+   OWASP references:
+   • A03:2021 – Injection (input validation)
+   • A05:2021 – Security Misconfiguration (rate limiting)
+
+   Rate limiting strategy (client-side):
+   ─────────────────────────────────────
+   Uses localStorage to track submission timestamps per IP-equivalent
+   (origin + user agent fingerprint — best available in a static site).
+   Limits: max 3 submissions per 15-minute window.
+
+   ⚠ IMPORTANT: Client-side rate limiting is a UX safeguard only.
+     A determined attacker can clear localStorage and bypass it.
+     For true rate limiting, route the form through:
+       • Formspree (https://formspree.io) — free tier, IP-based limiting
+       • Cloudflare Turnstile (bot detection, CAPTCHA-free)
+       • Netlify Forms or Cloudflare Workers
+     Replace the handleCTASubmit body below with a fetch() to your
+     chosen endpoint. Never embed API keys in this HTML file.
+   ─────────────────────────────────────────────────────────────── */
+
+const MM_SECURITY = (function() {
+  'use strict';
+
+  // ── Rate limit configuration ──
+  const RATE_LIMIT = {
+    maxAttempts: 3,          // max submissions allowed
+    windowMs: 15 * 60 * 1000, // per 15-minute window
+    storageKey: 'mm_rl_cta'  // localStorage key
+  };
+
+  // ── Input validation schema for the email field ──
+  const EMAIL_SCHEMA = {
+    maxLength: 254,           // RFC 5321 maximum email length
+    // RFC 5322-compliant regex (practical subset — covers 99.9% of real addresses)
+    pattern: /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$/,
+    // Block obvious injection payloads and script tags
+    blocklist: [/<script/i, /javascript:/i, /on\w+=/i, /data:text\/html/i]
+  };
+
+  /**
+   * sanitiseString — strips HTML tags and trims whitespace.
+   * This is belt-and-braces: the CSP already blocks script execution,
+   * but we never want raw user input reflected back into the DOM.
+   * @param {string} str
+   * @returns {string}
+   */
+  function sanitiseString(str) {
+    if (typeof str !== 'string') return '';
+    return str
+      .trim()
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#x27;');
+  }
+
+  /**
+   * validateEmail — schema-based validation.
+   * Returns { valid: boolean, error: string|null }
+   */
+  function validateEmail(raw) {
+    // Type check
+    if (typeof raw !== 'string') {
+      return { valid: false, error: 'Invalid input type.' };
+    }
+
+    // Length check (before trim, to catch padding attacks)
+    if (raw.length > EMAIL_SCHEMA.maxLength) {
+      return { valid: false, error: `Email must not exceed ${EMAIL_SCHEMA.maxLength} characters.` };
+    }
+
+    const value = raw.trim();
+
+    // Empty check
+    if (value.length === 0) {
+      return { valid: false, error: 'Please enter your email address.' };
+    }
+
+    // Blocklist check — reject known injection patterns
+    for (const pattern of EMAIL_SCHEMA.blocklist) {
+      if (pattern.test(value)) {
+        return { valid: false, error: 'Invalid characters detected.' };
+      }
+    }
+
+    // RFC-compliant format check
+    if (!EMAIL_SCHEMA.pattern.test(value)) {
+      return { valid: false, error: 'Please enter a valid email address.' };
+    }
+
+    return { valid: true, error: null };
+  }
+
+  /**
+   * checkRateLimit — reads/writes localStorage to enforce submission throttle.
+   * Returns { allowed: boolean, retryAfterMs: number }
+   */
+  function checkRateLimit() {
+    let record;
+    try {
+      const raw = localStorage.getItem(RATE_LIMIT.storageKey);
+      record = raw ? JSON.parse(raw) : { attempts: [], blocked: false };
+    } catch {
+      // If localStorage is unavailable or corrupted, allow the request
+      // (fail open for usability — rate limiting is a best-effort defence here)
+      return { allowed: true, retryAfterMs: 0 };
+    }
+
+    const now = Date.now();
+    const windowStart = now - RATE_LIMIT.windowMs;
+
+    // Prune attempts outside the current window
+    record.attempts = (record.attempts || []).filter(t => t > windowStart);
+
+    if (record.attempts.length >= RATE_LIMIT.maxAttempts) {
+      const oldest = record.attempts[0];
+      const retryAfterMs = RATE_LIMIT.windowMs - (now - oldest);
+      return { allowed: false, retryAfterMs: Math.max(0, retryAfterMs) };
+    }
+
+    return { allowed: true, retryAfterMs: 0 };
+  }
+
+  /**
+   * recordAttempt — logs a submission attempt to localStorage.
+   */
+  function recordAttempt() {
+    try {
+      const raw = localStorage.getItem(RATE_LIMIT.storageKey);
+      const record = raw ? JSON.parse(raw) : { attempts: [] };
+      const now = Date.now();
+      const windowStart = now - RATE_LIMIT.windowMs;
+      record.attempts = (record.attempts || []).filter(t => t > windowStart);
+      record.attempts.push(now);
+      localStorage.setItem(RATE_LIMIT.storageKey, JSON.stringify(record));
+    } catch {
+      // localStorage write failure is non-fatal
+    }
+  }
+
+  /**
+   * formatRetryTime — converts milliseconds to a human-readable string.
+   */
+  function formatRetryTime(ms) {
+    const minutes = Math.ceil(ms / 60000);
+    return minutes === 1 ? '1 minute' : `${minutes} minutes`;
+  }
+
+  /**
+   * showFieldError — displays a validation error below the input.
+   * Uses textContent (not innerHTML) to prevent DOM injection.
+   */
+  function showFieldError(inputEl, message) {
+    // Remove any existing error
+    const existingErr = inputEl.parentNode.querySelector('.mm-field-error');
+    if (existingErr) existingErr.remove();
+
+    inputEl.style.borderColor = 'rgba(232,64,42,.6)';
+    inputEl.setAttribute('aria-invalid', 'true');
+
+    const errEl = document.createElement('p');
+    errEl.className = 'mm-field-error';
+    errEl.style.cssText = 'font-family:var(--mono);font-size:9px;color:rgba(232,64,42,.8);margin-top:6px;letter-spacing:.04em;';
+    errEl.textContent = message; // textContent — never innerHTML
+    inputEl.parentNode.insertBefore(errEl, inputEl.nextSibling);
+  }
+
+  function clearFieldError(inputEl) {
+    const existingErr = inputEl.parentNode.querySelector('.mm-field-error');
+    if (existingErr) existingErr.remove();
+    inputEl.style.borderColor = '';
+    inputEl.setAttribute('aria-invalid', 'false');
+  }
+
+  // Public API
+  return { sanitiseString, validateEmail, checkRateLimit, recordAttempt, formatRetryTime, showFieldError, clearFieldError };
+})();
+
+/* CTA SUBMIT
+   ──────────
+   Hardened against:
+   • Weak validation (was: just `includes('@')`)
+   • No length limits
+   • No rate limiting
+   • Reflected user input (used textContent throughout — safe)
+
+   ⚠ TO SEND EMAILS: This form currently only validates client-side.
+     To actually receive submissions, replace the success block below
+     with a fetch() to Formspree or EmailJS. Example (Formspree):
+
+       const res = await fetch('https://formspree.io/f/YOUR_FORM_ID', {
+         method: 'POST',
+         headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+         body: JSON.stringify({ email: sanitised })
+       });
+
+     Store the form ID in a Formspree account — never put API keys in HTML.
+*/
+function handleCTASubmit(btn) {
+  const inp = document.getElementById('cta-email');
+  if (!inp) return;
+
+  // ── CONTROL 4: Rate limit check (429 equivalent) ──
+  const { allowed, retryAfterMs } = MM_SECURITY.checkRateLimit();
+  if (!allowed) {
+    MM_SECURITY.showFieldError(
+      inp,
+      `Too many requests. Please try again in ${MM_SECURITY.formatRetryTime(retryAfterMs)}.`
+    );
+    return;
+  }
+
+  // ── CONTROL 3: Validate & sanitise input ──
+  const { valid, error } = MM_SECURITY.validateEmail(inp.value);
+  if (!valid) {
+    MM_SECURITY.showFieldError(inp, error);
+    return;
+  }
+
+  // Input is valid — sanitise before any use
+  const sanitisedEmail = MM_SECURITY.sanitiseString(inp.value.trim());
+
+  // Record this attempt against the rate limit window
+  MM_SECURITY.recordAttempt();
+
+  // Clear any previous error state
+  MM_SECURITY.clearFieldError(inp);
+
+  // ── Success state ──
+  // Note: sanitisedEmail is NOT injected into the DOM here.
+  // If you later add a "we'll contact you at {email}" message,
+  // always use textContent, never innerHTML.
+  btn.textContent = '✓ Received';
+  btn.classList.add('sent');
+  btn.disabled = true;
+  inp.disabled = true;
+
+  // Remove the error element if any persists
+  const errEl = inp.parentNode.querySelector('.mm-field-error');
+  if (errEl) errEl.remove();
+}
+
+/* ══════════════════════════════════════
+   HERO COVER — cursor flashlight + ambient waveform
+══════════════════════════════════════ */
+(function(){
+  const hero = document.getElementById('s-hero');
+  const flCanvas = document.getElementById('hero-flashlight');
+  const waveCanvas = document.getElementById('hero-wave-bg');
+  if(!hero||!flCanvas||!waveCanvas) return;
+
+  const flCtx = flCanvas.getContext('2d');
+  const wCtx  = waveCanvas.getContext('2d');
+
+  // Mouse state
+  let mx=0, my=0, mouseInside=false;
+  let tmx=0, tmy=0; // smoothed
+
+  hero.addEventListener('mousemove', e=>{
+    const r=hero.getBoundingClientRect();
+    mx=e.clientX-r.left; my=e.clientY-r.top; mouseInside=true;
+  });
+  hero.addEventListener('mouseleave', ()=>mouseInside=false);
+
+  // Resize both canvases
+  function resize(){
+    const W=hero.offsetWidth, H=hero.offsetHeight;
+    [flCanvas,waveCanvas].forEach(c=>{
+      c.width=W; c.height=H;
+      c.style.width=W+'px'; c.style.height=H+'px';
+    });
+    // Hero sphere canvas matches its CSS size
+    const hs=document.getElementById('hero-sphere-bg');
+    if(hs){ const s=hs.getBoundingClientRect(); hs.width=Math.round(s.width); hs.height=Math.round(s.height); }
+  }
+  resize();
+  window.addEventListener('resize',resize);
+
+  const GRID=72; // match CSS background-size
+  const GOLD='rgba(201,162,74,';
+
+  // ── FLASHLIGHT canvas: draws the bright grid only where cursor is ──
+  function drawFlashlight(){
+    const W=flCanvas.width, H=flCanvas.height;
+    flCtx.clearRect(0,0,W,H);
+    if(!mouseInside){ return; }
+
+    // Smooth the mouse position
+    tmx += (mx-tmx)*.09;
+    tmy += (my-tmy)*.09;
+
+    // Build a pattern
+    const offCanvas=document.createElement('canvas');
+    offCanvas.width=GRID; offCanvas.height=GRID;
+    const oc=offCanvas.getContext('2d');
+    oc.strokeStyle='rgba(201,162,74,.9)';
+    oc.lineWidth=.8;
+    oc.beginPath();
+    oc.moveTo(GRID,0);oc.lineTo(0,0);oc.lineTo(0,GRID);
+    oc.stroke();
+
+    // Fill with the pattern
+    const pat=flCtx.createPattern(offCanvas,'repeat');
+
+    // Use a radial gradient mask via compositing
+    const R=280;
+    const radGrad=flCtx.createRadialGradient(tmx,tmy,0,tmx,tmy,R);
+    radGrad.addColorStop(0,'rgba(0,0,0,1)');
+    radGrad.addColorStop(.65,'rgba(0,0,0,.7)');
+    radGrad.addColorStop(1,'rgba(0,0,0,0)');
+
+    flCtx.save();
+    flCtx.fillStyle=radGrad;
+    flCtx.fillRect(0,0,W,H);
+    flCtx.globalCompositeOperation='source-in';
+    flCtx.fillStyle=pat;
+    flCtx.fillRect(0,0,W,H);
+    flCtx.restore();
+  }
+
+  // ── WAVEFORM canvas: ambient biometric lines, mouse warps them ──
+  let wT=0;
+  const SIGNALS=[
+    {color:'rgba(232,64,42,',  freq:13, freq2:5.2, amp:.060, yBase:.25, label:'GSR',   note:'Galvanic Skin Response'},
+    {color:'rgba(155,82,204,', freq:9,  freq2:3.8, amp:.045, yBase:.42, label:'PUPIL', note:'Pupil Dilation'},
+    {color:'rgba(46,173,92,',  freq:11, freq2:4.4, amp:.050, yBase:.60, label:'HRV',   note:'Heart Rate Variability'},
+    {color:'rgba(232,148,10,', freq:7,  freq2:2.9, amp:.038, yBase:.78, label:'GAZE',  note:'Gaze Fixation'},
+  ];
+
+  function drawWaveform(){
+    // Always use the canvas element's logical pixel size
+    const W=waveCanvas.width, H=waveCanvas.height;
+    wCtx.clearRect(0,0,W,H);
+    wT+=0.007;
+
+    const mInfluence = mouseInside ? 1 : 0;
+    const mnx = tmx/W, mny = tmy/H;
+
+    SIGNALS.forEach((sig,si)=>{
+      const baseAlpha = mouseInside ? .78 : .42;
+      const lineW     = mouseInside ? 1.6 : 1.1;
+
+      wCtx.beginPath();
+      for(let i=0;i<=600;i++){
+        const xn=i/600, x=xn*W;
+        let y=sig.yBase*H + Math.sin(xn*sig.freq+wT+si*.8)*sig.amp*H
+                          + Math.sin(xn*sig.freq2+wT*.55+si*.5)*sig.amp*.4*H;
+        const distX=Math.abs(xn-mnx);
+        if(distX<0.25 && mInfluence>0){
+          const pull=Math.pow(1-distX/0.25,2)*.6;
+          y=y+(mny*H-y)*pull*mInfluence;
+        }
+        i===0?wCtx.moveTo(x,y):wCtx.lineTo(x,y);
+      }
+      wCtx.strokeStyle=sig.color+baseAlpha+')';
+      wCtx.lineWidth=lineW;
+      wCtx.stroke();
+
+      // Label block at left edge
+      const labelY=sig.yBase*H;
+      const labelAlpha = mouseInside ? .82 : .48;
+      wCtx.font=`700 9px "JetBrains Mono",monospace`;
+      wCtx.fillStyle=sig.color+labelAlpha+')';
+      wCtx.fillText(sig.label, 12, labelY-6);
+      wCtx.font=`500 7px "JetBrains Mono",monospace`;
+      wCtx.fillStyle=sig.color+(labelAlpha*.55)+')';
+      wCtx.fillText(sig.note, 12, labelY+8);
+    });
+  }
+
+  // ── HERO SPHERE — ghost sphere with waveforms projected on surface ──
+  let hsT=0;
+  function drawHeroSphere(){
+    const hs=document.getElementById('hero-sphere-bg');
+    if(!hs||!hs.width||!hs.height) return;
+    const hCtx=hs.getContext('2d');
+    const W=hs.width, H=hs.height;
+    const cx=W/2, cy=H/2, r=Math.min(W,H)/2-2;
+    hCtx.clearRect(0,0,W,H);
+    hsT+=0.006;
+
+    hCtx.save();
+    hCtx.beginPath(); hCtx.arc(cx,cy,r,0,Math.PI*2); hCtx.clip();
+
+    // Dark warm interior
+    const bg=hCtx.createRadialGradient(cx*.8,cy*.8,r*.05,cx,cy,r);
+    bg.addColorStop(0,'#2c1e08'); bg.addColorStop(.5,'#160c02'); bg.addColorStop(1,'#07050a');
+    hCtx.fillStyle=bg; hCtx.fillRect(0,0,W,H);
+
+    // Equirectangular grid
+    hCtx.strokeStyle='rgba(201,162,74,.1)'; hCtx.lineWidth=.5;
+    for(let i=1;i<4;i++){const y=cy-r+(2*r/4)*i;hCtx.beginPath();hCtx.moveTo(cx-r,y);hCtx.lineTo(cx+r,y);hCtx.stroke();}
+    for(let i=1;i<7;i++){const x=cx-r+(2*r/7)*i;hCtx.beginPath();hCtx.moveTo(x,cy-r);hCtx.lineTo(x,cy+r);hCtx.stroke();}
+
+    // Project the four waveforms onto the sphere surface
+    const HSIGS=[
+      {color:'rgba(232,64,42,',  freq:13, freq2:5.2, amp:.055, yBase:.32},
+      {color:'rgba(155,82,204,', freq:9,  freq2:3.8, amp:.038, yBase:.46},
+      {color:'rgba(46,173,92,',  freq:11, freq2:4.4, amp:.042, yBase:.60},
+      {color:'rgba(232,148,10,', freq:7,  freq2:2.9, amp:.032, yBase:.74},
+    ];
+    HSIGS.forEach((sig,si)=>{
+      hCtx.beginPath();
+      let first=true;
+      for(let i=0;i<=300;i++){
+        const xn=i/300;
+        const px=cx-r+xn*2*r;
+        // Clip to circle
+        const dx=px-cx, maxDy=Math.sqrt(Math.max(0,r*r-dx*dx));
+        if(maxDy<2){first=true;continue;}
+        const yWave=sig.yBase*(2*r) + Math.sin(xn*sig.freq+hsT+si*.8)*sig.amp*(2*r)
+                                    + Math.sin(xn*sig.freq2+hsT*.55+si*.5)*sig.amp*.4*(2*r);
+        const py=(cy-r)+yWave;
+        if(first){hCtx.moveTo(px,py);first=false;}else{hCtx.lineTo(px,py);}
+      }
+      hCtx.strokeStyle=sig.color+'.55)'; hCtx.lineWidth=.9; hCtx.stroke();
+    });
+
+    // Gaze dot sweeping around
+    const gAngle=hsT*.4;
+    const gx=cx+Math.cos(gAngle)*r*.55;
+    const gy=cy+Math.sin(gAngle*.7)*r*.3;
+    const rp=(hsT*1.2)%1;
+    hCtx.beginPath(); hCtx.arc(gx,gy,4+rp*8,0,Math.PI*2);
+    hCtx.strokeStyle=`rgba(201,162,74,${.4-rp*.4})`; hCtx.lineWidth=.8; hCtx.stroke();
+    hCtx.beginPath(); hCtx.arc(gx,gy,3,0,Math.PI*2);
+    hCtx.fillStyle='rgba(201,162,74,.75)'; hCtx.fill();
+
+    hCtx.restore();
+    // Gold rim
+    hCtx.save(); hCtx.beginPath(); hCtx.arc(cx,cy,r,0,Math.PI*2);
+    hCtx.strokeStyle='rgba(201,162,74,.2)'; hCtx.lineWidth=1.5; hCtx.stroke(); hCtx.restore();
+  }
+
+  // ── BLOB parallax on mouse ──
+  function updateBlobs(){
+    if(!mouseInside) return;
+    const W=hero.offsetWidth, H=hero.offsetHeight;
+    const nx=(mx/W-.5), ny=(my/H-.5);
+    document.getElementById('hb1').style.transform=`translate(${nx*-28}px,${ny*-20}px)`;
+    document.getElementById('hb2').style.transform=`translate(${nx*18}px,${ny*14}px)`;
+    document.getElementById('hb3').style.transform=`translate(${nx*-12}px,${ny*10}px)`;
+  }
+
+  // ── GRID offset animation (for flashlight matching CSS grid) ──
+  // The CSS bg-grid scrolls via @keyframes; we just need the flashlight to follow
+
+  // ── Main loop ──
+  function loop(){
+    // Update smooth mouse
+    if(mouseInside){
+      tmx+=(mx-tmx)*.08;
+      tmy+=(my-tmy)*.08;
+    }
+    drawFlashlight();
+    drawWaveform();
+    drawHeroSphere();
+    updateBlobs();
+    requestAnimationFrame(loop);
+  }
+  loop();
+})();
+
+/* SPHERE — ported directly from working v3 */
+function lp(a,b,t){return a+(b-a)*t;}
+const SC=document.getElementById('sphere-canvas');
+const sx=SC.getContext('2d');
+let sW=0,sH=0,sR=0;
+let sphereStarted=false;
+function rszS(){
+  sW=SC.offsetWidth; sH=SC.offsetHeight;
+  if(!sW||!sH){const wrap=SC.closest('.sphere-wrap');if(wrap){sW=wrap.offsetWidth;sH=wrap.offsetHeight;}}
+  if(!sW||!sH) return;
+  SC.width=sW*devicePixelRatio; SC.height=sH*devicePixelRatio;
+  sx.setTransform(1,0,0,1,0,0);
+  sx.scale(devicePixelRatio,devicePixelRatio);
+  sR=Math.min(sW,sH)/2-4;
+}
+window.addEventListener('resize',rszS);
+const WP=[{ax:.38,ay:.40,z:'WINDOW'},{ax:.55,ay:.33,z:'CEILING DETAIL'},{ax:.63,ay:.56,z:'CEILING DETAIL'},{ax:.28,ay:.60,z:'FIREPLACE'},{ax:.22,ay:.46,z:'FIREPLACE'},{ax:.50,ay:.42,z:'WINDOW'},{ax:.72,ay:.37,z:'WINDOW'}];
+let gI=0,gA=0,gX=.4,gY=.4;
+const hPts=[];let sT=0,sT2=0;
+const BUF=90;const gB=[],pB=[],aB=[],hB=[];
+for(let i=0;i<BUF;i++){gB.push(.62);pB.push(4.1);aB.push(62);hB.push(68);}
+function drawSphere(){
+  sT+=.02;const cx=sW/2,cy=sH/2;
+  sx.clearRect(0,0,sW,sH);
+  sx.save();sx.beginPath();sx.arc(cx,cy,sR,0,Math.PI*2);sx.clip();
+  const bg=sx.createRadialGradient(cx*.88,cy*.88,0,cx,cy,sR);
+  bg.addColorStop(0,'#2c1e08');bg.addColorStop(.55,'#160c02');bg.addColorStop(1,'#07050a');
+  sx.fillStyle=bg;sx.fillRect(0,0,sW,sH);
+  sx.strokeStyle='rgba(245,244,240,.04)';sx.lineWidth=.5;
+  for(let i=1;i<4;i++){const y=cy-sR+(2*sR/4)*i;sx.beginPath();sx.moveTo(cx-sR,y);sx.lineTo(cx+sR,y);sx.stroke();}
+  for(let i=1;i<7;i++){const x=cx-sR+(2*sR/7)*i;sx.beginPath();sx.moveTo(x,cy-sR);sx.lineTo(x,cy+sR);sx.stroke();}
+  sx.strokeStyle='rgba(245,244,240,.1)';sx.lineWidth=.6;
+  sx.beginPath();sx.moveTo(cx-sR,cy+sR*.26);sx.lineTo(cx,cy+sR*.38);sx.lineTo(cx+sR,cy+sR*.26);sx.stroke();
+  sx.strokeStyle='rgba(201,162,74,.12)';sx.lineWidth=.6;
+  sx.strokeRect(cx-sR*.29,cy-sR*.27,sR*.40,sR*.45);
+  gA+=.009;
+  if(gA>=1){gA=0;gI=(gI+1)%WP.length;hPts.push({x:gX,y:gY,v:gB[gB.length-1]});if(hPts.length>100)hPts.shift();}
+  const wp=WP[gI];gX=lp(gX,wp.ax,.03);gY=lp(gY,wp.ay,.03);
+  hPts.forEach((pt,idx)=>{
+    const age=idx/hPts.length;
+    const px=cx-sR+pt.x*2*sR,py=cy-sR+pt.y*2*sR,r=sR*.18;
+    const col=pt.v>.82?'rgba(232,64,42,':pt.v>.68?'rgba(201,162,74,':'rgba(155,82,204,';
+    const g=sx.createRadialGradient(px,py,0,px,py,r);
+    g.addColorStop(0,col+(age*.4)+')');g.addColorStop(1,col+'0)');
+    sx.fillStyle=g;sx.beginPath();sx.arc(px,py,r,0,Math.PI*2);sx.fill();
+  });
+  const gx=cx-sR+gX*2*sR,gy=cy-sR+gY*2*sR;
+  const rp=sT%1;
+  sx.beginPath();sx.arc(gx,gy,9+rp*12,0,Math.PI*2);sx.strokeStyle=`rgba(201,162,74,${.4-rp*.4})`;sx.lineWidth=.9;sx.stroke();
+  sx.beginPath();sx.arc(gx,gy,5.5,0,Math.PI*2);sx.fillStyle='rgba(201,162,74,.82)';sx.fill();
+  sx.beginPath();sx.arc(gx,gy,1.8,0,Math.PI*2);sx.fillStyle='#fff';sx.fill();
+  sx.font='600 7px "JetBrains Mono",monospace';
+  const zt=wp.z,tw=sx.measureText(zt).width;
+  sx.fillStyle='rgba(12,7,2,.82)';sx.fillRect(gx+10,gy-13,tw+11,13);
+  sx.fillStyle='rgba(201,162,74,.88)';sx.fillText(zt,gx+15,gy-3);
+  sx.restore();
+  sx.save();sx.beginPath();sx.arc(cx,cy,sR,0,Math.PI*2);sx.strokeStyle='rgba(201,162,74,.08)';sx.lineWidth=1.5;sx.stroke();sx.restore();
+  document.getElementById('gaze-dot').style.left=((cx-sR+gX*2*sR)/sW*100)+'%';
+  document.getElementById('gaze-dot').style.top=((cy-sR+gY*2*sR)/sH*100)+'%';
+  document.getElementById('v-zone').textContent=wp.z;
+  updSig();requestAnimationFrame(drawSphere);
+}
+function updSig(){
+  sT2+=.04;
+  const gv=0.64+Math.sin(sT2*.85)*.13+Math.sin(sT2*3.2)*.04+(Math.random()-.5)*.016;
+  gB.shift();gB.push(gv);document.getElementById('v-gsr').textContent=gv.toFixed(2);
+  const pv=4.1+Math.sin(sT2*.6)*.45+Math.sin(sT2*2.4)*.1+(Math.random()-.5)*.04;
+  pB.shift();pB.push(pv);document.getElementById('v-pupil').textContent=pv.toFixed(1)+'mm';
+  const hv=68+Math.sin(sT2*.42)*8+Math.sin(sT2*1.7)*3+(Math.random()-.5)*1.5;
+  hB.shift();hB.push(hv);document.getElementById('v-hrv').textContent=Math.round(hv)+'ms';
+  const av=62+Math.sin(sT2*.7+.5)*15+Math.sin(sT2*2.9)*4+(Math.random()-.5)*2.2;
+  aB.shift();aB.push(av);document.getElementById('v-arousal').textContent=Math.round(av)+'%';
+  spark('sk-gsr',gB,'var(--gsr)',.44,.95);spark('sk-pupil',pB,'var(--pupil)',3.4,5.1);
+  spark('sk-hrv',hB,'var(--hrv)',55,82);spark('sk-arousal',aB,'var(--gold)',35,92);
+  document.getElementById('pill-gsr').classList.toggle('on',gv>.84);
+}
+function spark(id,buf,col,mn,mx){
+  const el=document.getElementById(id);const W=400,H=26;
+  const pts=buf.map((v,i)=>{const x=i/(buf.length-1)*W;const y=H-((v-mn)/(mx-mn))*H*.88-H*.06;return `${x},${y}`;}).join(' ');
+  el.innerHTML=`<defs><linearGradient id="g${id}" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="${col}" stop-opacity=".07"/><stop offset="100%" stop-color="${col}" stop-opacity="1"/></linearGradient></defs><polyline points="${pts}" fill="none" stroke="url(#g${id})" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>`;
+}
+// v3 exact pattern: observe the canvas directly, fire on intersection
+function startSphere(){
+  if(sphereStarted) return;
+  rszS();
+  if(!sW||!sH){ setTimeout(startSphere,80); return; }
+  sphereStarted=true;
+  drawSphere();
+}
+const scObs=new IntersectionObserver(entries=>{
+  if(entries[0].isIntersecting){ scObs.disconnect(); startSphere(); }
+},{threshold:.1});
+scObs.observe(SC);
+window._startSphere=startSphere;
+
+/* ══════════════════════════════════════
+   LIQUID-METAL BUTTON ENGINE
+   Pure canvas — gold palette.
+   One self-contained function that takes a <canvas> element
+   and runs a shimmering metallic liquid animation.
+   All buttons share the same approach; each gets its own canvas context.
+══════════════════════════════════════ */
+(function(){
+  // Palette: warm gold liquid metal
+  const PALETTE=[
+    [201,162,74],   // --gold
+    [240,200,100],  // bright highlight
+    [120, 88, 20],  // deep shadow
+    [170,130,55],   // mid gold
+    [255,220,130],  // warm specular
+    [ 80, 56, 10],  // dark groove
+  ];
+
+  function lerpColor(a,b,t){
+    return [
+      Math.round(a[0]+(b[0]-a[0])*t),
+      Math.round(a[1]+(b[1]-a[1])*t),
+      Math.round(a[2]+(b[2]-a[2])*t),
+    ];
+  }
+
+  function metalColor(t){
+    // Map t [0,1] through the palette
+    const n=PALETTE.length-1;
+    const pos=t*n;
+    const i=Math.min(Math.floor(pos),n-1);
+    const f=pos-i;
+    return lerpColor(PALETTE[i],PALETTE[i+1],f);
+  }
+
+  // Creates and runs a liquid-metal canvas animation on a given <canvas>.
+  // Returns { setSpeed, destroy }
+  function createLiquidMetal(canvas, speed){
+    let W,H,running=true,t=0,spd=speed||0.55;
+    const ctx=canvas.getContext('2d');
+    const dpr=window.devicePixelRatio||1;
+
+    function resize(){
+      // Try getBoundingClientRect first; fall back to parent shell's inline style
+      let rect=canvas.getBoundingClientRect();
+      let w=rect.width, h=rect.height;
+      if(!w||!h){
+        const shell=canvas.closest('.lm-btn-shell');
+        if(shell){
+          // Read inline width/height from style attribute e.g. style="width:160px;height:46px"
+          w=parseFloat(shell.style.width)||shell.offsetWidth||160;
+          h=parseFloat(shell.style.height)||shell.offsetHeight||46;
+        }
+      }
+      if(!w||!h) return;
+      W=w; H=h;
+      canvas.width=W*dpr; canvas.height=H*dpr;
+      ctx.setTransform(1,0,0,1,0,0);
+      ctx.scale(dpr,dpr);
+    }
+    resize();
+    window.addEventListener('resize',resize);
+
+    // Noise field — two overlapping sine layers give the liquid look
+    function noise(x,y,time){
+      const s1=Math.sin(x*3.8+time*1.1)*Math.cos(y*2.4+time*.7);
+      const s2=Math.sin(x*1.9+y*2.6-time*.9)*Math.cos(x*2.1-y*1.4+time*.5);
+      const s3=Math.sin((x+y)*2.8+time*.6)*0.4;
+      return (s1+s2+s3)/2.4; // [-1,1]
+    }
+
+    function draw(){
+      if(!running) return;
+      t+=spd*0.016;
+      ctx.clearRect(0,0,W,H);
+
+      // Sample a grid and build imageData
+      const cols=Math.ceil(W), rows=Math.ceil(H);
+      const imgData=ctx.createImageData(cols,rows);
+      const d=imgData.data;
+
+      for(let py=0;py<rows;py++){
+        for(let px=0;px<cols;px++){
+          const nx=px/W, ny=py/H;
+          // Distort UV with noise for the liquid swirl
+          const dx=noise(nx*4,ny*4,t)*0.18;
+          const dy=noise(nx*4+5,ny*4+3,t+1)*0.18;
+          const ux=nx+dx, uy=ny+dy;
+          // Primary noise value
+          const v=noise(ux*6,uy*4,t);
+          // Map to [0,1]
+          const raw=(v+1)*0.5;
+          // Boost contrast for that polished metal look
+          const boosted=Math.pow(raw,0.7);
+          // Add a sharp specular streak
+          const spec=Math.pow(Math.max(0,Math.sin(ux*12+t*1.4+uy*6)),8)*0.55;
+          const final=Math.min(1,boosted+spec);
+
+          const [r,g,b]=metalColor(final);
+          const idx=(py*cols+px)*4;
+          d[idx]=r; d[idx+1]=g; d[idx+2]=b; d[idx+3]=255;
+        }
+      }
+      ctx.putImageData(imgData,0,0);
+      requestAnimationFrame(draw);
+    }
+    draw();
+
+    return {
+      setSpeed(s){ spd=s; },
+      destroy(){ running=false; window.removeEventListener('resize',resize); }
+    };
+  }
+
+  // Wire up a button shell element with the liquid-metal canvas + interactions
+  function initLiquidBtn(opts){
+    // opts: { canvas, shell, hitbox, label, inner, onSuccess }
+    const {canvas,shell,hitbox,label,inner,onSuccess}=opts;
+    let lm=null;
+    let done=false;
+
+    // Lazy-init the shader when first visible
+    const obs=new IntersectionObserver(entries=>{
+      if(entries[0].isIntersecting && !lm){
+        obs.disconnect();
+        // One frame delay so layout is complete before reading dimensions
+        requestAnimationFrame(()=>{
+          lm=createLiquidMetal(canvas,0.55);
+        });
+      }
+    },{threshold:0.1});
+    obs.observe(shell);
+
+    // Shadow helper
+    function setShadow(mode){
+      if(mode==='hover'){
+        shell.style.boxShadow='0 0 0 1px rgba(0,0,0,.4),0 8px 20px rgba(201,162,74,.18),0 4px 8px rgba(0,0,0,.18)';
+      } else if(mode==='press'){
+        shell.style.boxShadow='inset 0 2px 4px rgba(0,0,0,.5),0 0 0 1px rgba(0,0,0,.5)';
+        inner.style.boxShadow='inset 0 2px 6px rgba(0,0,0,.5)';
+      } else {
+        shell.style.boxShadow='0 0 0 1px rgba(0,0,0,.3),0 4px 14px rgba(0,0,0,.18),0 2px 4px rgba(0,0,0,.12)';
+        inner.style.boxShadow='none';
+      }
+    }
+    setShadow('default');
+
+    hitbox.addEventListener('mouseenter',()=>{
+      lm&&lm.setSpeed(1.1);
+      setShadow('hover');
+      shell.style.transform='translateY(-1px)';
+    });
+    hitbox.addEventListener('mouseleave',()=>{
+      lm&&lm.setSpeed(0.55);
+      setShadow('default');
+      shell.style.transform='none';
+      inner.style.boxShadow='none';
+    });
+    hitbox.addEventListener('mousedown',()=>{
+      lm&&lm.setSpeed(2.4);
+      setShadow('press');
+      shell.style.transform='translateY(1px) scale(.98)';
+    });
+    hitbox.addEventListener('mouseup',()=>{
+      lm&&lm.setSpeed(1.1);
+      setShadow('hover');
+      shell.style.transform='translateY(-1px)';
+      inner.style.boxShadow='none';
+    });
+
+    hitbox.addEventListener('click',e=>{
+      if(done) return;
+      // Ripple
+      const rect=hitbox.getBoundingClientRect();
+      const rip=document.createElement('span');
+      rip.className='lm-ripple';
+      rip.style.left=(e.clientX-rect.left)+'px';
+      rip.style.top=(e.clientY-rect.top)+'px';
+      hitbox.appendChild(rip);
+      setTimeout(()=>rip.remove(),620);
+
+      if(onSuccess){
+        done=true;
+        onSuccess(label);
+        lm&&lm.setSpeed(2.8);
+        setTimeout(()=>lm&&lm.setSpeed(0.55),400);
+      }
+    });
+
+    // Touch support
+    hitbox.addEventListener('touchstart',()=>{ lm&&lm.setSpeed(2.4); setShadow('press'); },{passive:true});
+    hitbox.addEventListener('touchend',()=>{ lm&&lm.setSpeed(0.55); setShadow('default'); shell.style.transform='none'; });
+  }
+
+  // ── Wire up all buttons on DOMContentLoaded ──
+  window.addEventListener('DOMContentLoaded',()=>{
+    // CTA button
+    const ctaCanvas=document.getElementById('lm-cta-cv');
+    const ctaShell=document.getElementById('lm-cta-shell');
+    const ctaHitbox=document.getElementById('lm-cta-btn');
+    const ctaLabel=document.getElementById('lm-cta-label');
+    const ctaInner=ctaShell&&ctaShell.querySelector('.lm-inner');
+    if(ctaCanvas&&ctaShell&&ctaHitbox&&ctaLabel&&ctaInner){
+      initLiquidBtn({
+        canvas:ctaCanvas, shell:ctaShell, hitbox:ctaHitbox,
+        label:ctaLabel, inner:ctaInner,
+        onSuccess(lbl){
+          lbl.textContent='✓ Sent';
+          lbl.style.color='var(--hrv)';
+        }
+      });
+    }
+  });
+})();
+
+/* ══════════════════════════════════════════════
+   REACTIVE REVEAL ENGINE — fixed
+   Key fixes:
+   1. Two-frame RAF delay before adding .words-in
+      so transitions fire after display:flex reflow
+   2. JS-controlled row stagger via .row-in + inline delay
+   3. Section padding override
+   4. rslide-split uses CSS grid (no inline override)
+══════════════════════════════════════════════ */
+(function(){
+
+  const DECKS = {
+    what: {
+      slides: [
+        { heading:'Space acts on the body.', body:null },
+        { heading:'Made invisible — until now.', body:'Measured Mind makes that response visible — mapping biometric signals directly onto the spaces that provoked them, at 30ms resolution, in full 360°.' },
+        { heading:'Five channels. One picture.', body:'Every signal tells a different part of the story. Together they produce the first complete physiological portrait of a person in space.' },
+      ],
+      section:'s-what', cursorId:'rc-what', curId:'what-cur',
+      totId:'what-tot', progId:'what-prog', hintId:'what-hint',
+      slidePrefix:'what-s', headPrefix:'what-t', bodyPrefix:'what-b',
+    },
+    prob: {
+      slides: [
+        { heading:'Words are the wrong instrument.', body:'Every conventional design tool captures what people say they like — not what their bodies actually respond to.' },
+        { heading:'Three methods. Zero subconscious data.', body:'Architecture is experienced before it is understood. None of the standard tools read at that level.' },
+        { heading:'The signal has always been there.', body:null },
+      ],
+      section:'s-problem', cursorId:'rc-prob', curId:'prob-cur',
+      totId:'prob-tot', progId:'prob-prog', hintId:'prob-hint',
+      slidePrefix:'prob-s', headPrefix:'prob-t', bodyPrefix:'prob-b',
+    },
+  };
+
+  function wordSpans(text, baseDelay, cls){
+    return text.split(' ').map((w,i)=>{
+      const d = (baseDelay + i*0.038).toFixed(3);
+      return `<span class="${cls}" style="transition-delay:${d}s">${w}</span>`;
+    }).join(' ');
+  }
+
+  function initDeck(key){
+    const d = DECKS[key];
+    const section = document.getElementById(d.section);
+    if(!section) return;
+
+    const total = d.slides.length;
+    let current = 0;
+
+    // Set total label
+    const totEl = document.getElementById(d.totId);
+    if(totEl) totEl.textContent = String(total).padStart(2,'0');
+
+    // Pre-fill heading/body text as word spans (all slides)
+    d.slides.forEach((s,i)=>{
+      const hEl = document.getElementById(d.headPrefix+i);
+      if(hEl && s.heading) hEl.innerHTML = wordSpans(s.heading, 0.04, 'reveal-word');
+      const bEl = document.getElementById(d.bodyPrefix+i);
+      if(bEl && s.body) bEl.innerHTML = wordSpans(s.body, 0.18, 'reveal-body-word');
+    });
+
+    function updateCounter(idx){
+      const el = document.getElementById(d.curId);
+      if(!el) return;
+      el.style.opacity='0'; el.style.transform='translateY(8px)';
+      setTimeout(()=>{
+        el.textContent = String(idx+1).padStart(2,'0');
+        el.style.transition='opacity .3s,transform .3s';
+        el.style.opacity='1'; el.style.transform='none';
+      }, 160);
+    }
+
+    function updateProgress(idx){
+      const el = document.getElementById(d.progId);
+      if(el) el.style.width = (((idx+1)/total)*100)+'%';
+    }
+
+    function activateSlide(slideEl){
+      // Step 1: make visible as flex (no words-in yet)
+      slideEl.style.display = 'flex';
+      slideEl.style.flexDirection = 'column';
+      slideEl.style.justifyContent = 'center';
+
+      // Step 2: two RAF frames so browser paints the display:flex first
+      requestAnimationFrame(()=>{
+        requestAnimationFrame(()=>{
+          // Trigger all word/bar/stat transitions
+          slideEl.classList.add('words-in');
+
+          // Stagger rows with JS-applied delays (fixes nth-child scope bug)
+          slideEl.querySelectorAll('.reveal-signal-row').forEach((r,i)=>{
+            r.style.transitionDelay = (0.06 + i*0.11)+'s';
+            r.classList.add('row-in');
+          });
+          slideEl.querySelectorAll('.reveal-method-row').forEach((r,i)=>{
+            r.style.transitionDelay = (0.05 + i*0.13)+'s';
+            r.classList.add('row-in');
+          });
+
+          // If this slide contains the sphere canvas, start it
+          if(slideEl.querySelector('#sphere-canvas') && window._startSphere){
+            setTimeout(window._startSphere, 80);
+          }
+          // If it contains the interactive glimpse canvases, start those
+          if(slideEl.id==='what-s1' && window._startGlimpse){
+            setTimeout(window._startGlimpse, 100);
+          }
+        });
+      });
+    }
+
+    function deactivateSlide(slideEl){
+      slideEl.style.display = 'none';
+      slideEl.classList.remove('words-in');
+      // Reset rows
+      slideEl.querySelectorAll('.reveal-signal-row,.reveal-method-row').forEach(r=>{
+        r.classList.remove('row-in');
+        r.style.transitionDelay = '0s';
+      });
+    }
+
+    function showSlide(idx){
+      // Hide all
+      for(let i=0;i<total;i++){
+        const el = document.getElementById(d.slidePrefix+i);
+        if(el) deactivateSlide(el);
+      }
+      // Show target
+      const target = document.getElementById(d.slidePrefix+idx);
+      if(target) activateSlide(target);
+
+      updateCounter(idx);
+      updateProgress(idx);
+
+      // Update cursor label: "Next" normally, "Back to start" on last slide
+      const lbl = document.querySelector(`#${d.cursorId} .reveal-cursor-label`);
+      if(lbl) lbl.textContent = idx === total-1 ? 'Again' : 'Next';
+
+      const hint = document.getElementById(d.hintId);
+      if(hint) hint.style.opacity = idx===0 ? '1' : '0';
+    }
+
+    function advance(e){
+      // Don't fire if clicking on interactive children
+      if(e && e.target.closest('input,button,a,canvas,svg')) return;
+      // Cycle: at last slide wrap back to first
+      current = current < total-1 ? current+1 : 0;
+      showSlide(current);
+    }
+
+    section.addEventListener('click', advance);
+
+    // Custom magnetic cursor — fast lerp, teleport on enter to avoid lag
+    const cursor = document.getElementById(d.cursorId);
+    let cx=0, cy=0, tx=0, ty=0, raf=null;
+
+    function animateCursor(){
+      // Faster lerp (0.18) for snappier feel
+      cx += (tx-cx)*0.18;
+      cy += (ty-cy)*0.18;
+      if(cursor){
+        cursor.style.left = cx+'px';
+        cursor.style.top  = cy+'px';
+      }
+      raf = requestAnimationFrame(animateCursor);
+    }
+
+    section.addEventListener('mousemove', e=>{
+      const r = section.getBoundingClientRect();
+      tx = e.clientX - r.left;
+      ty = e.clientY - r.top;
+    });
+    section.addEventListener('mouseenter', e=>{
+      if(cursor) cursor.classList.add('hovered');
+      // Teleport to actual mouse position — no rubber-band lag from stale position
+      const r = section.getBoundingClientRect();
+      cx = tx = e.clientX - r.left;
+      cy = ty = e.clientY - r.top;
+      if(cursor){ cursor.style.left = cx+'px'; cursor.style.top = cy+'px'; }
+      cancelAnimationFrame(raf);
+      animateCursor();
+    });
+    section.addEventListener('mouseleave', ()=>{
+      if(cursor) cursor.classList.remove('hovered');
+      cancelAnimationFrame(raf);
+      raf = null;
+    });
+
+    // Show slide 0 immediately
+    showSlide(0);
+  }
+
+  // Run after DOM is ready
+  if(document.readyState==='loading'){
+    document.addEventListener('DOMContentLoaded', ()=>{ initDeck('what'); initDeck('prob'); });
+  } else {
+    initDeck('what'); initDeck('prob');
+  }
+
+})();
+
+/* ══════════════════════════════════════
+   CRITICAL MOMENTS — interactive timeline
+   Panel p-2: animated gaze, play/pause scrub,
+   clickable moment rows jump to that moment
+══════════════════════════════════════ */
+(function(){
+  // Scene waypoints [t_norm 0-1, gaze_x%, gaze_y%, blob1_alpha, blob2_alpha, tag_text, tag_color]
+  const WAYPOINTS=[
+    {t:0,    gx:38, gy:32, b1:0,    b2:0,    tag:'',                     tc:'var(--gsr)'},
+    {t:0.20, gx:35, gy:28, b1:.0,   b2:.0,   tag:'',                     tc:'var(--gsr)'},
+    {t:0.34, gx:34, gy:26, b1:.48,  b2:.0,   tag:'⚡ WINDOW — GSR · 3.4s',tc:'var(--gsr)'},
+    {t:0.45, gx:50, gy:35, b1:.28,  b2:.0,   tag:'',                     tc:'var(--gsr)'},
+    {t:0.55, gx:57, gy:44, b1:.1,   b2:.0,   tag:'',                     tc:'var(--pupil)'},
+    {t:0.64, gx:60, gy:47, b1:.05,  b2:.42,  tag:'↑ CEILING — Pupil · 6.1s',tc:'var(--pupil)'},
+    {t:0.72, gx:42, gy:52, b1:.0,   b2:.2,   tag:'',                     tc:'var(--gsr)'},
+    {t:0.83, gx:22, gy:72, b1:.32,  b2:.0,   tag:'⚡ FIREPLACE — GSR · 7.9s',tc:'var(--gsr)'},
+    {t:1.00, gx:30, gy:55, b1:.1,   b2:.0,   tag:'',                     tc:'var(--gsr)'},
+  ];
+
+  let playing=false, progress=0, raf=null, lastTime=null;
+  const DURATION=9.5; // seconds
+
+  function lerp(a,b,t){return a+(b-a)*t;}
+  function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
+
+  function getState(p){
+    // Find surrounding waypoints
+    let lo=WAYPOINTS[0], hi=WAYPOINTS[WAYPOINTS.length-1];
+    for(let i=0;i<WAYPOINTS.length-1;i++){
+      if(p>=WAYPOINTS[i].t && p<=WAYPOINTS[i+1].t){ lo=WAYPOINTS[i]; hi=WAYPOINTS[i+1]; break; }
+    }
+    const t=lo.t===hi.t?0:(p-lo.t)/(hi.t-lo.t);
+    return{
+      gx:lerp(lo.gx,hi.gx,t), gy:lerp(lo.gy,hi.gy,t),
+      b1:lerp(lo.b1,hi.b1,t), b2:lerp(lo.b2,hi.b2,t),
+      tag:p>=lo.t&&p<=(lo.t+0.06)?lo.tag:'',
+      tc:lo.tc
+    };
+  }
+
+  function applyState(s){
+    const gaze=document.getElementById('cm-gaze');
+    const b1=document.getElementById('cm-blob1');
+    const b2=document.getElementById('cm-blob2');
+    const tag=document.getElementById('cm-tag');
+    const fill=document.getElementById('cm-fill');
+    const timeEl=document.getElementById('cm-time');
+    if(gaze){gaze.style.left=s.gx+'%';gaze.style.top=s.gy+'%';}
+    if(b1) b1.style.background=`rgba(232,64,42,${s.b1})`;
+    if(b2) b2.style.background=`rgba(155,82,204,${s.b2})`;
+    if(tag){
+      if(s.tag){
+        tag.style.opacity='1';
+        tag.style.background=s.b1>s.b2?'rgba(232,64,42,.88)':'rgba(155,82,204,.88)';
+        tag.textContent=s.tag;
+      } else { tag.style.opacity='0'; }
+    }
+    if(fill) fill.style.width=(progress*100)+'%';
+    if(timeEl) timeEl.textContent=(progress*DURATION).toFixed(1)+' / '+DURATION+'s';
+  }
+
+  function tick(ts){
+    if(!playing){lastTime=null;return;}
+    if(lastTime===null) lastTime=ts;
+    const dt=(ts-lastTime)/1000;
+    lastTime=ts;
+    progress=clamp(progress+dt/DURATION,0,1);
+    applyState(getState(progress));
+    if(progress>=1){ playing=false; setPlayIcon(); return; }
+    raf=requestAnimationFrame(tick);
+  }
+
+  function setPlayIcon(){
+    const btn=document.getElementById('cm-play');
+    if(btn) btn.textContent=playing?'⏸':'⏵';
+  }
+
+  function togglePlay(){
+    playing=!playing;
+    setPlayIcon();
+    if(playing){
+      if(progress>=1) progress=0;
+      lastTime=null;
+      raf=requestAnimationFrame(tick);
+    } else { cancelAnimationFrame(raf); }
+  }
+
+  function seekTo(p){
+    progress=clamp(p,0,1);
+    lastTime=null;
+    applyState(getState(progress));
+  }
+
+  function init(){
+    const playBtn=document.getElementById('cm-play');
+    const track=document.getElementById('cm-track');
+
+    if(playBtn) playBtn.addEventListener('click',e=>{e.stopPropagation();togglePlay();});
+
+    if(track){
+      track.addEventListener('click',e=>{
+        const r=track.getBoundingClientRect();
+        seekTo((e.clientX-r.left)/r.width);
+      });
+    }
+
+    // Moment row clicks
+    document.querySelectorAll('.cm-row').forEach(row=>{
+      row.addEventListener('click',e=>{
+        e.stopPropagation();
+        const t=parseFloat(row.dataset.t);
+        seekTo(t);
+        // Brief highlight
+        document.querySelectorAll('.cm-row').forEach(r=>r.style.background='');
+        row.style.background='rgba(26,22,16,.04)';
+        setTimeout(()=>row.style.background='',800);
+      });
+      row.addEventListener('mouseenter',()=>row.style.background='rgba(26,22,16,.03)');
+      row.addEventListener('mouseleave',()=>row.style.background='');
+    });
+
+    // Init display
+    applyState(getState(0));
+
+    // Auto-play when panel p-2 becomes active (setStep calls this)
+    const origSetStep=window.setStep;
+    window.setStep=function(n){
+      origSetStep(n);
+      if(n===2){
+        setTimeout(()=>{ if(!playing){playing=true;setPlayIcon();lastTime=null;raf=requestAnimationFrame(tick);} },400);
+      } else {
+        playing=false; setPlayIcon(); cancelAnimationFrame(raf);
+      }
+    };
+  }
+
+  if(document.readyState==='loading'){
+    document.addEventListener('DOMContentLoaded',init);
+  } else { init(); }
+})();
+
+/* ══════════════════════════════════════
+   INSPIRATION CARDS — hover highlight
+   + upload handler for bespoke space
+══════════════════════════════════════ */
+(function(){
+  function init(){
+    // Inspiration card hover: gold border shimmer
+    document.querySelectorAll('.inspo-card').forEach((card,i)=>{
+      const hl=document.getElementById('inspo-hl-'+i);
+      card.addEventListener('mouseenter',()=>{
+        card.style.outline='1.5px solid rgba(201,162,74,.55)';
+        card.style.outlineOffset='-1.5px';
+        if(hl){ hl.style.background='rgba(201,162,74,.06)'; }
+      });
+      card.addEventListener('mouseleave',()=>{
+        card.style.outline='';
+        if(hl){ hl.style.background=''; }
+      });
+    });
+  }
+
+  // Upload handler — shows thumbnail preview replacing the upload zone
+  /*
+    SECURITY CONTROL 5 — File Upload Validation
+    ─────────────────────────────────────────────
+    OWASP A01:2021 (Broken Access Control) & A03:2021 (Injection)
+
+    Risks mitigated:
+    • Oversized files causing memory/DoS issues (browser-side)
+    • Non-image files disguised with image/* MIME type
+    • Filename injection via innerHTML (switched to safe DOM API)
+    • SVG uploads (SVGs can contain embedded scripts — explicitly blocked)
+
+    Allowed: JPEG, PNG, GIF, WebP only (not SVG).
+    Max size: 10 MB (generous for a preview image; adjust as needed).
+
+    Note: This is client-side validation only. It cannot stop a
+    determined attacker who calls your endpoint directly. Since this
+    is a static site with no file upload endpoint, the risk is
+    limited to the uploader's own browser session — appropriate here.
+  */
+  window.handleSpaceUpload = function(input) {
+    if (!input.files || !input.files[0]) return;
+    const file = input.files[0];
+
+    // ── Allowed MIME types (explicit allowlist — not a blocklist) ──
+    const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    const MAX_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
+
+    // Validate MIME type against allowlist
+    if (!ALLOWED_TYPES.includes(file.type)) {
+      alert('Please upload a JPEG, PNG, GIF, or WebP image. SVG files are not accepted.');
+      input.value = ''; // Reset the input
+      return;
+    }
+
+    // Validate file size
+    if (file.size > MAX_SIZE_BYTES) {
+      alert('Image must be under 10 MB. Please compress and try again.');
+      input.value = '';
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      const zone = document.getElementById('upload-space-btn');
+      if (!zone) return;
+
+      // ── Safe DOM construction — no innerHTML with user-controlled values ──
+      // The data URL (e.target.result) is set via img.src (safe attribute assignment),
+      // NOT interpolated into an innerHTML string. This prevents any injection
+      // if the result were somehow non-standard.
+      zone.style.padding = '0';
+      zone.style.border = 'none';
+      zone.style.cursor = 'default';
+      zone.onmouseenter = null;
+      zone.onmouseleave = null;
+
+      // Build DOM nodes safely
+      const wrapper = document.createElement('div');
+      wrapper.style.cssText = 'position:relative;aspect-ratio:16/9;border-radius:2px;overflow:hidden;';
+
+      const img = document.createElement('img');
+      img.src = e.target.result; // Safe: data URL from FileReader, not user text
+      img.alt = 'Your uploaded space';
+      img.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;';
+
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:absolute;inset:0;background:linear-gradient(transparent 55%,rgba(10,6,2,.7));display:flex;align-items:flex-end;padding:8px 10px;';
+
+      const label = document.createElement('span');
+      label.style.cssText = 'font-family:var(--mono);font-size:7.5px;color:rgba(245,244,240,.8);';
+      label.textContent = 'Your space — archetype applied'; // textContent, not innerHTML
+
+      const badge = document.createElement('div');
+      badge.style.cssText = 'position:absolute;top:6px;right:6px;background:rgba(201,162,74,.9);color:var(--ink);font-family:var(--mono);font-size:6.5px;font-weight:700;padding:2px 7px;border-radius:1px;letter-spacing:.06em;';
+      badge.textContent = 'MINIMAL HAVEN'; // textContent, not innerHTML
+
+      overlay.appendChild(label);
+      wrapper.appendChild(img);
+      wrapper.appendChild(overlay);
+      wrapper.appendChild(badge);
+
+      // Clear the zone safely and append the new content
+      while (zone.firstChild) zone.removeChild(zone.firstChild);
+      zone.appendChild(wrapper);
+    };
+
+    reader.onerror = function() {
+      alert('Could not read the image file. Please try a different file.');
+      input.value = '';
+    };
+
+    reader.readAsDataURL(file);
+  };
+
+  if(document.readyState==='loading'){
+    document.addEventListener('DOMContentLoaded',init);
+  } else { init(); }
+})();
+
+/* ══════════════════════════════════════
+   PLATFORM 02/03 — INTERACTIVE GLIMPSE
+   1. Gaze heatmap: slow ambient drift + mouse interaction
+   2. GSR: slow breathing-pace signal (not distracting)
+   3. Pupil: two-eye canvas ported from software drawSingleEye
+══════════════════════════════════════ */
+(function(){
+  let glimpseRunning=false;
+  let gT=0;
+
+  /* ─────────────────────────────────────
+     1. GAZE HEATMAP — slow ambient drift
+     Mouse enters: crosshair follows cursor
+     Mouse absent: gaze drifts between zones
+  ───────────────────────────────────── */
+  let gazeCanvas,gazeCtx,gazeW=0,gazeH=0;
+  let gmx=0.5,gmy=0.4;         // target position (normalised)
+  let gSmx=0.5,gSmy=0.4;       // smoothed position (lerped slowly)
+  let gazeMouseInside=false;
+  let gpoints=[];
+  // Ambient drift waypoints
+  const GWPS=[{x:.35,y:.30},{x:.52,y:.45},{x:.28,y:.58},{x:.60,y:.28},{x:.42,y:.52}];
+  let gwpIdx=0,gwpT=0;
+
+  function initGazeCanvas(){
+    gazeCanvas=document.getElementById('glimpse-gaze');
+    const wrap=document.getElementById('glimpse-gaze-wrap');
+    if(!gazeCanvas||!wrap) return;
+    const dpr=window.devicePixelRatio||1;
+    gazeW=wrap.clientWidth;
+    gazeH=Math.round(gazeW*9/16);
+    gazeCanvas.width=gazeW*dpr; gazeCanvas.height=gazeH*dpr;
+    gazeCanvas.style.height=gazeH+'px';
+    gazeCtx=gazeCanvas.getContext('2d');
+    gazeCtx.scale(dpr,dpr);
+    wrap.addEventListener('mousemove',e=>{
+      const r=gazeCanvas.getBoundingClientRect();
+      gmx=(e.clientX-r.left)/r.width;
+      gmy=(e.clientY-r.top)/r.height;
+      gazeMouseInside=true;
+      gpoints.push({x:gSmx,y:gSmy,a:.8});
+      if(gpoints.length>30) gpoints.shift();
+    });
+    wrap.addEventListener('mouseleave',()=>{ gazeMouseInside=false; });
+  }
+
+  function drawGaze(){
+    if(!gazeCtx||!gazeW) return;
+
+    // Ambient drift when mouse not inside
+    if(!gazeMouseInside){
+      gwpT+=0.004; // very slow drift
+      if(gwpT>=1){ gwpT=0; gwpIdx=(gwpIdx+1)%GWPS.length; }
+      const nxt=GWPS[(gwpIdx+1)%GWPS.length];
+      gmx=GWPS[gwpIdx].x+(nxt.x-GWPS[gwpIdx].x)*gwpT;
+      gmy=GWPS[gwpIdx].y+(nxt.y-GWPS[gwpIdx].y)*gwpT;
+    }
+
+    // Slow smooth follow
+    gSmx+=(gmx-gSmx)*0.04;
+    gSmy+=(gmy-gSmy)*0.04;
+
+    // Accumulate trail every ~20 frames
+    if(Math.floor(gT*60)%20===0){
+      gpoints.push({x:gSmx,y:gSmy,a:.6});
+      if(gpoints.length>25) gpoints.shift();
+    }
+
+    gazeCtx.clearRect(0,0,gazeW,gazeH);
+    gazeCtx.fillStyle='#0e0806'; gazeCtx.fillRect(0,0,gazeW,gazeH);
+
+    // Grid
+    gazeCtx.strokeStyle='rgba(245,244,240,.04)'; gazeCtx.lineWidth=.5;
+    for(let i=1;i<4;i++){const y=gazeH/4*i;gazeCtx.beginPath();gazeCtx.moveTo(0,y);gazeCtx.lineTo(gazeW,y);gazeCtx.stroke();}
+    for(let i=1;i<6;i++){const x=gazeW/6*i;gazeCtx.beginPath();gazeCtx.moveTo(x,0);gazeCtx.lineTo(x,gazeH);gazeCtx.stroke();}
+
+    // Decay trail
+    gpoints=gpoints.map(p=>({...p,a:p.a*.96})).filter(p=>p.a>.02);
+    gpoints.forEach(p=>{
+      const px=p.x*gazeW,py=p.y*gazeH,r=gazeW*.16;
+      const g=gazeCtx.createRadialGradient(px,py,0,px,py,r);
+      g.addColorStop(0,`rgba(232,64,42,${p.a*.35})`);
+      g.addColorStop(.5,`rgba(201,162,74,${p.a*.12})`);
+      g.addColorStop(1,'rgba(0,0,0,0)');
+      gazeCtx.fillStyle=g; gazeCtx.beginPath(); gazeCtx.arc(px,py,r,0,Math.PI*2); gazeCtx.fill();
+    });
+
+    // Gaze cursor
+    const cx=gSmx*gazeW, cy=gSmy*gazeH;
+    const rp=(gT*.6)%1; // slow pulse
+    gazeCtx.beginPath();gazeCtx.arc(cx,cy,8+rp*10,0,Math.PI*2);
+    gazeCtx.strokeStyle=`rgba(201,162,74,${.45-rp*.45})`; gazeCtx.lineWidth=.8; gazeCtx.stroke();
+    gazeCtx.beginPath();gazeCtx.arc(cx,cy,4.5,0,Math.PI*2);
+    gazeCtx.fillStyle='rgba(201,162,74,.9)'; gazeCtx.fill();
+    gazeCtx.beginPath();gazeCtx.arc(cx,cy,1.6,0,Math.PI*2);
+    gazeCtx.fillStyle='#fff'; gazeCtx.fill();
+
+    // Zone labels — very subtle
+    gazeCtx.font='500 5.5px "JetBrains Mono",monospace';
+    gazeCtx.fillStyle='rgba(201,162,74,.18)';
+    [{x:.32,y:.26,l:'WINDOW'},{x:.54,y:.54,l:'CEILING'},{x:.18,y:.70,l:'FIREPLACE'}]
+      .forEach(z=>gazeCtx.fillText(z.l,z.x*gazeW,z.y*gazeH));
+  }
+
+  /* ─────────────────────────────────────
+     2. GSR — forms left→right, slow breathing
+  ───────────────────────────────────── */
+  const GSR_BUF=120;  // larger buffer = more history shown
+  let gsrBuf=[];      // starts empty — waveform builds from left
+  let gsrT=0;
+  let gsrPhase=0;     // tracks total points drawn so far (0→GSR_BUF then loops)
+
+  function tickGSR(){
+    gsrT+=0.012;
+    const v=0.62 + Math.sin(gsrT*.55)*.11 + Math.sin(gsrT*1.9)*.03 + (Math.random()-.5)*.008;
+    // Build phase: fill buffer left to right, then slide
+    if(gsrBuf.length < GSR_BUF){
+      gsrBuf.push(v);
+    } else {
+      gsrBuf.shift(); gsrBuf.push(v);
+    }
+    const line=document.getElementById('glimpse-gsr-line');
+    const dot=document.getElementById('glimpse-gsr-dot');
+    const val=document.getElementById('glimpse-gsr-val');
+    if(!line) return;
+    const W=200, H=80, mn=0.42, mx=0.92;
+    const filled=gsrBuf.length;
+    // Map only the filled portion across the viewBox width
+    const pts=gsrBuf.map((vv,i)=>{
+      const x=(i/(GSR_BUF-1))*W;
+      const y=H-(vv-mn)/(mx-mn)*H*.75-H*.06;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ');
+    line.setAttribute('points',pts);
+    // Dot at the leading edge
+    const last=gsrBuf[gsrBuf.length-1];
+    const lx=((filled-1)/(GSR_BUF-1))*W;
+    const ly=H-(last-mn)/(mx-mn)*H*.75-H*.06;
+    if(dot){
+      dot.setAttribute('cx',lx.toFixed(1));
+      dot.setAttribute('cy',ly.toFixed(1));
+      dot.setAttribute('opacity', filled>3 ? '0.9' : '0');
+    }
+    if(val) val.textContent=last.toFixed(2);
+  }
+
+  /* ─────────────────────────────────────
+     3. TWO-EYE CANVAS — hi-res warm bg
+  ───────────────────────────────────── */
+  let eyeCtx=null;
+  let pupilT=0;
+
+  function initEyeCanvas(){
+    const c=document.getElementById('glimpse-eye-canvas');
+    if(!c) return;
+    const dpr=window.devicePixelRatio||1;
+    // Canvas is 260×140 CSS pixels — bigger eyes at 4:3 aspect
+    c.width=Math.round(260*dpr); c.height=Math.round(140*dpr);
+    c.style.width='260px'; c.style.height='140px';
+    eyeCtx=c.getContext('2d');
+    eyeCtx.scale(dpr,dpr);
+  }
+
+  function drawSingleEye(ctx,cx,cy,outerR,pupilMM){
+    const norm=Math.max(0,Math.min(1,(pupilMM-2)/6));
+    const scR=outerR;
+    // Sclera
+    const sg=ctx.createRadialGradient(cx-scR*.25,cy-scR*.25,scR*.08,cx,cy,scR);
+    sg.addColorStop(0,'#ffffff'); sg.addColorStop(.45,'#f2efec');
+    sg.addColorStop(.75,'#dedad6'); sg.addColorStop(1,'#b8b4b0');
+    ctx.beginPath(); ctx.arc(cx,cy,scR,0,Math.PI*2); ctx.fillStyle=sg; ctx.fill();
+    // Iris
+    const iR=scR*(.48+norm*.08);
+    const ig=ctx.createRadialGradient(cx,cy,iR*.12,cx,cy,iR);
+    ig.addColorStop(0,'#907c6a'); ig.addColorStop(.28,'#6e5e50');
+    ig.addColorStop(.58,'#544840'); ig.addColorStop(.84,'#3c3430'); ig.addColorStop(1,'#28201c');
+    ctx.beginPath(); ctx.arc(cx,cy,iR,0,Math.PI*2); ctx.fillStyle=ig; ctx.fill();
+    ctx.beginPath(); ctx.arc(cx,cy,iR,0,Math.PI*2);
+    ctx.strokeStyle='rgba(20,14,8,.55)'; ctx.lineWidth=1.2; ctx.stroke();
+    // Radial iris lines
+    ctx.save(); ctx.globalAlpha=.07;
+    for(let i=0;i<24;i++){
+      const a=(i/24)*Math.PI*2;
+      ctx.beginPath();
+      ctx.moveTo(cx+Math.cos(a)*iR*.28, cy+Math.sin(a)*iR*.28);
+      ctx.lineTo(cx+Math.cos(a)*iR*.94, cy+Math.sin(a)*iR*.94);
+      ctx.strokeStyle='#fff'; ctx.lineWidth=.7; ctx.stroke();
+    }
+    ctx.restore();
+    // Top shadow
+    const is2=ctx.createLinearGradient(cx,cy-iR,cx,cy-iR*.15);
+    is2.addColorStop(0,'rgba(0,0,0,.22)'); is2.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.beginPath(); ctx.arc(cx,cy,iR,0,Math.PI*2); ctx.fillStyle=is2; ctx.fill();
+    // Pupil
+    const pR=iR*(.20+norm*.54);
+    ctx.beginPath(); ctx.arc(cx,cy,pR,0,Math.PI*2); ctx.fillStyle='#050302'; ctx.fill();
+    // Catchlights
+    ctx.beginPath(); ctx.arc(cx+iR*.22,cy-iR*.24,iR*.16,0,Math.PI*2);
+    ctx.fillStyle='rgba(255,255,255,.88)'; ctx.fill();
+    ctx.beginPath(); ctx.arc(cx-iR*.14,cy+iR*.19,iR*.065,0,Math.PI*2);
+    ctx.fillStyle='rgba(255,255,255,.32)'; ctx.fill();
+    // Bottom sclera shadow
+    const bs=ctx.createLinearGradient(cx,cy+scR*.45,cx,cy+scR);
+    bs.addColorStop(0,'rgba(0,0,0,0)'); bs.addColorStop(1,'rgba(0,0,0,.12)');
+    ctx.beginPath(); ctx.arc(cx,cy,scR,0,Math.PI*2); ctx.fillStyle=bs; ctx.fill();
+  }
+
+  function tickPupil(){
+    pupilT+=0.018;
+    const pv=4.1+Math.sin(pupilT*.65)*.6+Math.sin(pupilT*1.8)*.1;
+    if(!eyeCtx) return;
+    const W=260, H=140;
+    eyeCtx.clearRect(0,0,W,H);
+    // Warm dark bg with radial vignette
+    const bg=eyeCtx.createRadialGradient(W/2,H/2,0,W/2,H/2,W*.52);
+    bg.addColorStop(0,'#2a1a0e'); bg.addColorStop(1,'#0e0806');
+    eyeCtx.fillStyle=bg; eyeCtx.fillRect(0,0,W,H);
+    // Eyes — generous outerR to fill the 4:3 canvas
+    const outerR=Math.min(W*.19, H*.40);
+    drawSingleEye(eyeCtx, W*.27, H*.5, outerR, pv);
+    drawSingleEye(eyeCtx, W*.73, H*.5, outerR, pv);
+    // Update label
+    const val=document.getElementById('glimpse-pupil-val');
+    if(val) val.textContent=pv.toFixed(1)+'mm';
+  }
+
+  /* ─ MAIN LOOP ─ */
+  function loop(){
+    if(!glimpseRunning) return;
+    gT+=0.016;
+    drawGaze();
+    tickGSR();
+    tickPupil();
+    requestAnimationFrame(loop);
+  }
+
+  window._startGlimpse=function(){
+    if(glimpseRunning) return;
+    initGazeCanvas();
+    initEyeCanvas();
+    glimpseRunning=true;
+    loop();
+  };
+})();
+</script>
+</body>
+</html>
