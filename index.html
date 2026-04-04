@@ -1,0 +1,2595 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Measured Mind</title>
+
+<!--
+  ╔══════════════════════════════════════════════════════════════════╗
+  ║  SECURITY HARDENING — The Measured Mind                         ║
+  ║  WASP / OWASP Top-10 aligned                                    ║
+  ║                                                                  ║
+  ║  1. Content-Security-Policy (CSP)                               ║
+  ║     Prevents XSS, data exfiltration, clickjacking, and          ║
+  ║     execution of injected scripts / styles.                     ║
+  ║     ► In production: move these to HTTP response headers        ║
+  ║       (Apache: Header set / Nginx: add_header) so they cannot   ║
+  ║       be stripped by a <meta> tag replacement attack.           ║
+  ║                                                                  ║
+  ║  2. Referrer-Policy — limits URL leakage to third parties.      ║
+  ║  3. X-Content-Type-Options — prevents MIME sniffing.            ║
+  ║  4. Permissions-Policy — disables unused browser APIs.          ║
+  ╚══════════════════════════════════════════════════════════════════╝
+
+  PRODUCTION NOTE — API KEY HANDLING:
+  ─────────────────────────────────────────────────────────────────
+  This page currently has NO client-exposed API keys. ✓
+  Any future integrations (analytics, CRM, booking) MUST follow
+  this pattern:
+
+    ✗  NEVER:  const API_KEY = "sk-live-abc123..."
+    ✓  DO:     Keys live only in server-side environment variables
+               (e.g. process.env.MEASURED_MIND_API_KEY) and are
+               accessed via a thin proxy endpoint you control:
+                 POST /api/submit  → your server → third-party API
+               The browser never touches the raw key.
+
+    Key rotation schedule: rotate every 90 days minimum.
+    Use scoped / least-privilege keys (read-only where possible).
+    Audit key access logs monthly.
+  ─────────────────────────────────────────────────────────────────
+-->
+
+<!--
+  Content-Security-Policy
+  ─────────────────────────────────────────────────────────────────
+  script-src 'self'            → only scripts from this origin
+  script-src 'unsafe-inline'  → required for the inline <script>
+                                 block below. PRODUCTION: extract
+                                 JS to a .js file and remove this.
+  style-src 'unsafe-inline'   → required for inline <style>.
+                                 PRODUCTION: extract to .css file.
+  img-src 'self' data:         → canvas toDataURL + local assets
+  connect-src 'none'           → no fetch/XHR to any origin
+                                 (update to your API domain when
+                                  you add a backend endpoint)
+  frame-ancestors 'none'       → prevents clickjacking (equiv of
+                                  X-Frame-Options: DENY)
+  base-uri 'self'              → blocks <base> tag injection
+  form-action 'self'           → if a form is added, restrict POST
+  upgrade-insecure-requests    → auto-upgrade http:// → https://
+  ─────────────────────────────────────────────────────────────────
+-->
+<meta http-equiv="Content-Security-Policy" content="
+  default-src 'self';
+  script-src 'self' 'unsafe-inline';
+  style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+  font-src https://fonts.gstatic.com;
+  img-src 'self' data:;
+  connect-src 'none';
+  frame-src 'none';
+  frame-ancestors 'none';
+  base-uri 'self';
+  form-action 'self';
+  upgrade-insecure-requests;
+">
+
+<!-- Prevents MIME-type sniffing (OWASP A05) -->
+<meta http-equiv="X-Content-Type-Options" content="nosniff">
+
+<!-- Limits referrer info sent to third-party origins -->
+<meta name="referrer" content="strict-origin-when-cross-origin">
+
+<!--
+  Permissions-Policy — disable unused powerful APIs.
+  Prevents a compromised script from accessing camera/mic/location.
+  (This meta tag is informational; enforce via HTTP header in prod.)
+-->
+<meta http-equiv="Permissions-Policy" content="
+  camera=(),
+  microphone=(),
+  geolocation=(),
+  payment=(),
+  usb=(),
+  interest-cohort=()
+">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+/* ── TOKENS ─────────────────────────────────────────────────────── */
+:root {
+  --bg:    #09080a;
+  --bg1:   #0f0e10;
+  --bg2:   #141316;
+  --ink:   #eceae8;
+  --ink2:  rgba(236,234,232,.38);
+  --ink3:  rgba(236,234,232,.17);
+  --ink4:  rgba(236,234,232,.07);
+  --gold:  #c4a050;
+  --goldd: rgba(196,160,80,.16);
+  --rule:  rgba(236,234,232,.065);
+  --rulew: rgba(196,160,80,.09);
+  --gsr:   #b04838;
+  --pup:   #7258b0;
+  --gaze:  #3880b0;
+  --serif: 'Lora', Georgia, serif;
+  --mono:  'JetBrains Mono', monospace;
+  --ease:  cubic-bezier(.16,1,.3,1);
+}
+
+/* ── RESET ─────────────────────────────────────────────────────── */
+*,*::before,*::after { margin:0; padding:0; box-sizing:border-box; }
+html { scroll-behavior:smooth; -webkit-font-smoothing:antialiased; }
+body { background:var(--bg); color:var(--ink); font-family:var(--serif); overflow-x:hidden; cursor:none; }
+canvas { display:block; }
+
+/* ── CURSOR ────────────────────────────────────────────────────── */
+#CD,#CR { position:fixed; border-radius:50%; pointer-events:none; z-index:9000; transform:translate(-50%,-50%); }
+#CD { width:4px; height:4px; background:var(--gold); transition:transform .2s var(--ease); }
+#CR { width:22px; height:22px; border:1px solid rgba(196,160,80,.3); transition:width .4s var(--ease),height .4s var(--ease),border-color .3s; }
+body.hv #CD { transform:translate(-50%,-50%) scale(2.8); }
+body.hv #CR { width:36px; height:36px; border-color:rgba(196,160,80,.55); }
+
+/* ── PROGRESS ──────────────────────────────────────────────────── */
+#PG { position:fixed; top:0; left:0; height:1px; width:0; background:var(--gold); opacity:.45; z-index:8000; }
+
+/* ── LAYOUT ────────────────────────────────────────────────────── */
+.W { max-width:1120px; margin:0 auto; padding:0 80px; }
+
+/* ── KEYFRAMES ─────────────────────────────────────────────────── */
+@keyframes rise  { from{opacity:0;transform:translateY(14px)} to{opacity:1;transform:none} }
+@keyframes pulse { 0%,100%{opacity:.35} 50%{opacity:1} }
+@keyframes scan  { 0%{transform:translateY(-100%)} 100%{transform:translateY(300%)} }
+@keyframes grid  { from{background-position:0 0} to{background-position:88px 88px} }
+@keyframes stem  { 0%,100%{transform:scaleY(1);opacity:.45} 50%{transform:scaleY(.6);opacity:.9} }
+
+/* ── REVEAL ────────────────────────────────────────────────────── */
+.rv { opacity:0; transform:translateY(18px); transition:opacity 1s var(--ease), transform 1s var(--ease); }
+.rv.on { opacity:1; transform:none; }
+.rv.d1{transition-delay:.1s} .rv.d2{transition-delay:.24s} .rv.d3{transition-delay:.4s} .rv.d4{transition-delay:.56s}
+
+/* ── NAV ───────────────────────────────────────────────────────── */
+nav {
+  position:fixed; top:0; left:0; right:0; z-index:700;
+  padding:26px 80px; display:flex; align-items:center; justify-content:space-between;
+  border-bottom:1px solid transparent;
+  transition:padding .6s var(--ease), background .5s, border-color .5s;
+}
+nav.s { padding:16px 80px; background:rgba(9,8,10,.92); backdrop-filter:blur(22px); border-bottom-color:var(--rule); }
+.nl { display:flex; align-items:center; gap:11px; text-decoration:none; }
+.nl-o { width:15px; height:15px; border-radius:50%; border:1px solid rgba(196,160,80,.38); position:relative; flex-shrink:0; }
+.nl-o::after { content:''; position:absolute; width:3.5px; height:3.5px; border-radius:50%; background:var(--gold); opacity:.8; top:50%; left:50%; transform:translate(-50%,-50%); }
+.nl-t { font-family:var(--serif); font-size:13px; font-weight:500; letter-spacing:-.022em; color:rgba(236,234,232,.7); }
+nav ul { display:flex; gap:40px; list-style:none; }
+nav ul a { font-family:var(--mono); font-size:8.5px; font-weight:300; letter-spacing:.22em; text-transform:uppercase; color:var(--ink3); text-decoration:none; transition:color .25s; }
+nav ul a:hover { color:var(--ink2); }
+
+/* ── HERO ──────────────────────────────────────────────────────── */
+#hero {
+  position:relative; height:100vh; min-height:740px; overflow:hidden;
+  background:var(--bg); display:grid; grid-template-columns:44% 56%; align-items:center;
+}
+#hg {
+  position:absolute; inset:0; pointer-events:none;
+  background-image:linear-gradient(rgba(196,160,80,.022) 1px,transparent 1px),linear-gradient(90deg,rgba(196,160,80,.022) 1px,transparent 1px);
+  background-size:88px 88px; animation:grid 26s linear infinite;
+}
+#hv {
+  position:absolute; inset:0; pointer-events:none; z-index:3;
+  background:linear-gradient(90deg,var(--bg) 0%,var(--bg) 14%,rgba(9,8,10,.75) 46%,transparent 70%),radial-gradient(ellipse 50% 100% at 100% 50%,transparent 35%,var(--bg) 88%);
+}
+/* Left text */
+#ht { position:relative; z-index:10; padding-left:80px; }
+.hew { font-family:var(--mono); font-size:7.5px; font-weight:300; letter-spacing:.32em; text-transform:uppercase; color:rgba(196,160,80,.4); display:flex; align-items:center; gap:10px; margin-bottom:44px; animation:rise .8s .1s var(--ease) both; }
+.hld { width:3.5px; height:3.5px; border-radius:50%; background:var(--gold); animation:pulse 2.6s infinite; flex-shrink:0; }
+.hh { font-family:var(--serif); font-size:clamp(46px,5.4vw,80px); font-weight:700; letter-spacing:-.052em; line-height:.95; margin-bottom:36px; animation:rise 1.05s .3s var(--ease) both; }
+.hh em { font-style:italic; font-weight:400; color:var(--ink2); }
+.hr2 { width:36px; height:1px; background:linear-gradient(90deg,var(--gold),transparent); margin-bottom:28px; animation:rise .6s .52s var(--ease) both; }
+.hp { font-family:var(--serif); font-size:15px; font-weight:400; line-height:1.88; color:var(--ink2); max-width:340px; margin-bottom:52px; animation:rise .9s .66s var(--ease) both; }
+.ha { display:flex; align-items:center; gap:28px; animation:rise .8s .84s var(--ease) both; }
+.bf { font-family:var(--mono); font-size:9px; font-weight:400; letter-spacing:.2em; text-transform:uppercase; color:var(--bg); background:var(--gold); text-decoration:none; padding:13px 28px; display:inline-block; transition:opacity .25s,transform .4s var(--ease); }
+.bf:hover { opacity:.8; transform:translateY(-2px); }
+.bg2 { font-family:var(--mono); font-size:8.5px; font-weight:300; letter-spacing:.2em; text-transform:uppercase; color:var(--ink3); text-decoration:none; display:flex; align-items:center; gap:8px; transition:color .25s; }
+.bg2 i { font-style:normal; font-size:11px; transition:transform .3s var(--ease); }
+.bg2:hover { color:var(--ink2); }
+.bg2:hover i { transform:translateX(4px); }
+/* Right: sphere */
+#hsc { position:relative; z-index:5; height:100%; display:flex; align-items:center; justify-content:center; }
+#hsw { position:relative; width:min(52vw,620px); height:min(52vw,620px); }
+#hsc-cv { position:absolute; inset:0; width:100%; height:100%; }
+/* Corner brackets */
+.sb { position:absolute; width:16px; height:16px; pointer-events:none; animation:rise .6s 1.2s var(--ease) both; }
+.sb::before,.sb::after { content:''; position:absolute; background:rgba(196,160,80,.25); }
+.sb::before { width:100%; height:1px; top:0; }
+.sb::after  { height:100%; width:1px; top:0; }
+.sb.tl{top:0;left:0} .sb.tr{top:0;right:0;transform:scaleX(-1)} .sb.bl{bottom:0;left:0;transform:scaleY(-1)} .sb.br{bottom:0;right:0;transform:scale(-1)}
+/* Sphere annotations */
+.sa { position:absolute; font-family:var(--mono); font-size:6.5px; font-weight:300; letter-spacing:.18em; color:var(--ink4); white-space:nowrap; line-height:1.9; animation:rise .7s 1.25s var(--ease) both; }
+.sa.t { top:-26px; left:50%; transform:translateX(-50%); text-align:center; }
+.sa.b { bottom:-26px; left:50%; transform:translateX(-50%); text-align:center; }
+.sa.l { right:calc(100% + 16px); top:50%; transform:translateY(-50%); text-align:right; }
+.sa.r { left:calc(100% + 16px); top:50%; transform:translateY(-50%); }
+/* Scroll cue */
+.hsc2 { position:absolute; bottom:36px; left:80px; z-index:12; display:flex; flex-direction:column; gap:10px; align-items:flex-start; animation:rise .7s 1.5s ease both; }
+.hssl { width:1px; height:44px; background:linear-gradient(to bottom,rgba(196,160,80,.38),transparent); animation:stem 2.6s ease-in-out infinite; }
+.hslb { font-family:var(--mono); font-size:6.5px; font-weight:300; letter-spacing:.32em; text-transform:uppercase; color:rgba(196,160,80,.22); }
+/* Hero corner note */
+.hcn { position:absolute; bottom:32px; right:80px; font-family:var(--mono); font-size:6.5px; font-weight:300; letter-spacing:.14em; color:rgba(196,160,80,.16); line-height:1.88; pointer-events:none; z-index:12; text-align:right; animation:rise .6s 1.4s var(--ease) both; }
+
+/* ── STRIP ─────────────────────────────────────────────────────── */
+#strip { background:var(--bg1); border-top:1px solid var(--rule); border-bottom:1px solid var(--rule); }
+.sr { max-width:1120px; margin:0 auto; padding:0 80px; display:flex; }
+.sc { flex:1; padding:36px 44px 36px 0; border-right:1px solid var(--rule); display:flex; flex-direction:column; gap:8px; }
+.sc:first-child { padding-left:0; }
+.sc:last-child { border-right:none; padding-right:0; padding-left:44px; }
+.scl { font-family:var(--mono); font-size:7px; font-weight:300; letter-spacing:.26em; text-transform:uppercase; color:var(--ink4); }
+.scv { font-family:var(--mono); font-size:20px; font-weight:400; letter-spacing:-.03em; line-height:1; display:flex; align-items:baseline; gap:4px; }
+.scu { font-size:8.5px; font-weight:300; letter-spacing:.1em; color:var(--gold); opacity:.7; }
+.scs { font-family:var(--mono); font-size:6.5px; font-weight:300; letter-spacing:.14em; color:var(--ink4); }
+
+/* ── SYSTEM ────────────────────────────────────────────────────── */
+#sys { background:var(--bg); border-top:1px solid var(--rule); }
+.sys-intro { display:grid; grid-template-columns:1fr 1fr; gap:100px; align-items:end; padding:120px 0 96px; }
+.s-h2 { font-family:var(--serif); font-size:clamp(28px,3.4vw,46px); font-weight:700; letter-spacing:-.042em; line-height:1.05; }
+.s-p  { font-family:var(--serif); font-size:14.5px; font-weight:400; line-height:1.92; color:var(--ink2); }
+
+/* kicker */
+.kk { font-family:var(--mono); font-size:7.5px; font-weight:300; letter-spacing:.3em; text-transform:uppercase; color:var(--ink4); display:flex; align-items:center; gap:14px; margin-bottom:22px; }
+.kkb { width:26px; height:1px; background:var(--rulew); flex-shrink:0; }
+.kkd { width:2.5px; height:2.5px; border-radius:50%; background:var(--gold); flex-shrink:0; animation:pulse 3.5s infinite; }
+
+/* Process */
+.proc { display:grid; grid-template-columns:repeat(4,1fr); border-top:1px solid var(--rule); border-bottom:1px solid var(--rule); }
+.pc { padding:52px 36px 52px 0; border-right:1px solid var(--rule); transition:background .7s var(--ease); }
+.pc:first-child{padding-left:0} .pc:last-child{border-right:none;padding-right:0}
+.pc:hover{background:rgba(196,160,80,.018)}
+.pcn { font-family:var(--mono); font-size:7px; font-weight:300; letter-spacing:.26em; color:var(--ink4); margin-bottom:36px; display:block; }
+.pcs { width:1px; height:28px; margin-bottom:24px; overflow:hidden; position:relative; }
+.pcs::before { content:''; position:absolute; inset:0; animation:scan 2.8s linear infinite; animation-delay:var(--d,0s); background:linear-gradient(transparent,var(--c,var(--gold)),transparent); }
+.pct { font-family:var(--serif); font-size:15.5px; font-weight:600; letter-spacing:-.025em; line-height:1.25; margin-bottom:10px; }
+.pcb { font-family:var(--serif); font-size:12.5px; font-weight:400; line-height:1.82; color:var(--ink2); }
+
+/* Narrative */
+.narr { border-top:1px solid var(--rule); }
+.nr { display:grid; grid-template-columns:1fr 1fr; gap:96px; align-items:center; padding:96px 0; border-bottom:1px solid var(--rule); }
+.nr.alt{direction:rtl} .nr.alt>*{direction:ltr}
+.nrn { font-family:var(--mono); font-size:7px; font-weight:300; letter-spacing:.28em; color:var(--ink4); display:block; margin-bottom:28px; }
+.nrh { font-family:var(--serif); font-size:clamp(22px,2.6vw,34px); font-weight:700; letter-spacing:-.042em; line-height:1.08; margin-bottom:20px; }
+.nrh em { font-style:italic; font-weight:400; color:var(--ink2); }
+.nrp { font-family:var(--serif); font-size:13.5px; font-weight:400; line-height:1.9; color:var(--ink2); margin-bottom:12px; }
+.nrs { display:flex; align-items:center; gap:10px; margin-top:32px; }
+.nrsb { width:18px; height:1px; flex-shrink:0; }
+.nrsl { font-family:var(--mono); font-size:7.5px; font-weight:300; letter-spacing:.22em; text-transform:uppercase; }
+
+/* Instrument panel — the key fix: use padding-top for aspect-ratio on older browsers too */
+.panel {
+  position:relative; background:var(--bg2); border:1px solid var(--rule); overflow:hidden;
+  /* explicit height via aspect-ratio - works in modern browsers */
+  aspect-ratio:16/9;
+  /* fallback: min-height for the canvas to have something to measure */
+  min-height:200px;
+}
+.panel canvas { position:absolute; inset:0; width:100%; height:100%; }
+.pin { position:absolute; inset:0; border:1px solid var(--rule); pointer-events:none; z-index:10; }
+.plb { position:absolute; top:13px; left:14px; z-index:11; font-family:var(--mono); font-size:6.5px; font-weight:300; letter-spacing:.2em; text-transform:uppercase; color:var(--ink4); display:flex; align-items:center; gap:6px; }
+.pld { width:3.5px; height:3.5px; border-radius:50%; animation:pulse 2s infinite; }
+.pcr { position:absolute; font-family:var(--mono); font-size:6.5px; font-weight:300; letter-spacing:.12em; color:var(--ink4); z-index:11; }
+.ptr{top:13px;right:14px} .pbl{bottom:13px;left:14px} .pbr{bottom:13px;right:14px}
+
+/* ── ARCHETYPES ────────────────────────────────────────────────── */
+#arch { background:var(--bg1); border-top:1px solid var(--rule); border-bottom:1px solid var(--rule); padding:160px 0; }
+.ai { display:grid; grid-template-columns:1fr auto; gap:60px; align-items:end; margin-bottom:72px; }
+.ain { font-family:var(--mono); font-size:80px; font-weight:300; letter-spacing:-.06em; color:var(--ink4); line-height:1; }
+.ail { font-family:var(--mono); font-size:7px; font-weight:300; letter-spacing:.22em; text-transform:uppercase; color:var(--ink4); text-align:right; }
+.ag { display:grid; grid-template-columns:repeat(4,1fr); border:1px solid var(--rule); }
+.ac {
+  padding:40px 28px 32px; border-right:1px solid var(--rule); border-bottom:1px solid var(--rule);
+  position:relative; overflow:hidden; cursor:none; min-height:250px;
+  display:flex; flex-direction:column; justify-content:space-between;
+  transition:background .65s var(--ease);
+}
+.ac:nth-child(4n){border-right:none} .ac:nth-child(n+5){border-bottom:none}
+.ac:hover{background:rgba(196,160,80,.022)}
+.ac::after { content:''; position:absolute; bottom:0; left:0; width:100%; height:1px; background:var(--cc,var(--gold)); transform:scaleX(0); transform-origin:left; transition:transform .65s var(--ease); }
+.ac:hover::after{transform:scaleX(1)}
+.aci { font-family:var(--mono); font-size:6.5px; font-weight:300; letter-spacing:.26em; color:var(--ink4); display:block; margin-bottom:20px; }
+.acn { font-family:var(--serif); font-size:15.5px; font-weight:600; letter-spacing:-.025em; line-height:1.25; margin-bottom:12px; transition:color .4s; }
+.ac:hover .acn{color:var(--cc,var(--gold))}
+.acd { font-family:var(--serif); font-size:12px; font-weight:400; line-height:1.72; color:var(--ink2); max-height:0; overflow:hidden; opacity:0; transition:max-height .55s var(--ease),opacity .45s var(--ease); }
+.ac:hover .acd{max-height:90px;opacity:1}
+.act { font-family:var(--mono); font-size:7px; font-weight:300; letter-spacing:.18em; text-transform:uppercase; color:var(--ink4); transition:color .4s; }
+.ac:hover .act{color:var(--cc,var(--gold));opacity:.65}
+.ac:nth-child(1){--cc:#6aa868}.ac:nth-child(2){--cc:#c29a38}.ac:nth-child(3){--cc:#4a88c2}.ac:nth-child(4){--cc:#b85040}
+.ac:nth-child(5){--cc:#9268b8}.ac:nth-child(6){--cc:#c2984a}.ac:nth-child(7){--cc:#5aa8a2}.ac:nth-child(8){--cc:#9ea098}
+
+/* ── ANALYSIS ──────────────────────────────────────────────────── */
+#an { background:var(--bg); border-top:1px solid var(--rule); padding:160px 0 0; }
+.anh { display:grid; grid-template-columns:1fr 1fr; gap:100px; align-items:end; padding-bottom:64px; }
+
+/* Frame */
+.fr { border:1px solid var(--rule); background:var(--bg1); }
+.frb { height:36px; display:flex; align-items:center; padding:0 18px; border-bottom:1px solid var(--rule); background:rgba(236,234,232,.012); }
+.frd { display:flex; gap:5px; margin-right:16px; }
+.frdot { width:6px; height:6px; border-radius:50%; background:var(--rule); }
+.frp { font-family:var(--mono); font-size:7.5px; font-weight:300; letter-spacing:.16em; color:var(--ink4); }
+.frs { margin-left:auto; font-family:var(--mono); font-size:7px; font-weight:300; letter-spacing:.2em; color:var(--gold); opacity:.6; display:flex; align-items:center; gap:6px; }
+.frs::before { content:''; width:4px; height:4px; border-radius:50%; background:var(--gold); animation:pulse 2.2s infinite; }
+.frb2 { display:grid; grid-template-columns:1fr 270px; min-height:520px; }
+.frm { border-right:1px solid var(--rule); display:flex; flex-direction:column; }
+.frmh { padding:12px 18px; border-bottom:1px solid var(--rule); display:flex; justify-content:space-between; align-items:center; }
+.frmhl { font-family:var(--mono); font-size:7px; font-weight:300; letter-spacing:.22em; text-transform:uppercase; color:var(--ink4); }
+.frmhr { font-family:var(--mono); font-size:7px; font-weight:300; letter-spacing:.14em; color:var(--gold); opacity:.5; }
+.frsa { flex:1; display:flex; align-items:center; justify-content:center; padding:28px; position:relative; min-height:340px; }
+#ansph { position:relative; z-index:3; display:block; width:280px; height:280px; }
+
+/* Bio channels */
+.frs2 { display:flex; flex-direction:column; }
+.bio { flex:1; border-bottom:1px solid var(--rule); display:flex; flex-direction:column; overflow:hidden; min-height:80px; }
+.bio:last-of-type{border-bottom:none}
+.bioh { display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid var(--rule); flex-shrink:0; }
+.bioid { font-family:var(--mono); font-size:6.5px; font-weight:300; letter-spacing:.22em; text-transform:uppercase; color:var(--ink4); display:flex; align-items:center; gap:6px; }
+.biop { width:5px; height:5px; border-radius:50%; opacity:.6; flex-shrink:0; }
+.bior { font-family:var(--mono); font-size:12px; font-weight:400; letter-spacing:-.02em; }
+.biou { font-size:7.5px; font-weight:300; opacity:.5; margin-left:1px; }
+/* Bio wave fills its flex cell — min-height ensures canvas has real dimensions */
+.biow { flex:1; position:relative; min-height:80px; }
+.biow canvas { position:absolute; inset:0; width:100%!important; height:100%!important; }
+
+/* Score */
+.sp { padding:16px 14px; border-top:1px solid var(--rule); }
+.spl { font-family:var(--mono); font-size:6.5px; font-weight:300; letter-spacing:.26em; text-transform:uppercase; color:var(--ink4); margin-bottom:14px; }
+.spr { display:flex; align-items:center; gap:9px; margin-bottom:8px; }
+.sprn { font-family:var(--mono); font-size:7.5px; font-weight:300; color:var(--ink3); width:66px; flex-shrink:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.sprt { flex:1; height:1px; background:rgba(236,234,232,.045); }
+.sprf { height:100%; transform-origin:left; transform:scaleX(0); transition:transform 1.5s var(--ease); }
+.sprf.go{transform:scaleX(1)}
+.sprv { font-family:var(--mono); font-size:7.5px; font-weight:300; color:var(--ink4); width:22px; text-align:right; flex-shrink:0; }
+
+/* ── CLOSING ───────────────────────────────────────────────────── */
+#cl { padding:200px 0 160px; background:var(--bg); text-align:center; position:relative; overflow:hidden; border-top:1px solid var(--rule); }
+#cl::after { content:''; position:absolute; inset:0; pointer-events:none; background-image:linear-gradient(rgba(196,160,80,.02) 1px,transparent 1px),linear-gradient(90deg,rgba(196,160,80,.02) 1px,transparent 1px); background-size:64px 64px; mask-image:radial-gradient(ellipse 60% 60% at 50% 50%,transparent,black); -webkit-mask-image:radial-gradient(ellipse 60% 60% at 50% 50%,transparent,black); }
+.clm { width:36px; height:36px; border-radius:50%; border:1px solid var(--rulew); display:flex; align-items:center; justify-content:center; margin:0 auto 56px; position:relative; z-index:2; }
+.clm::after { content:''; width:7px; height:7px; border-radius:50%; background:var(--gold); opacity:.45; animation:pulse 3s infinite; }
+.clh { font-family:var(--serif); font-size:clamp(38px,6vw,78px); font-weight:700; letter-spacing:-.05em; line-height:.98; max-width:700px; margin:0 auto 32px; position:relative; z-index:2; }
+.clh em { font-style:italic; font-weight:400; color:var(--ink2); }
+.clp { font-family:var(--serif); font-size:15px; font-weight:400; line-height:1.9; color:var(--ink2); max-width:360px; margin:0 auto 60px; position:relative; z-index:2; }
+.cla { display:flex; align-items:center; justify-content:center; gap:32px; margin-bottom:88px; position:relative; z-index:2; }
+.clr { width:1px; height:72px; background:linear-gradient(to bottom,transparent,var(--rule),transparent); margin:0 auto 44px; position:relative; z-index:2; }
+.cln { font-family:var(--mono); font-size:7px; font-weight:300; letter-spacing:.24em; text-transform:uppercase; color:var(--ink4); position:relative; z-index:2; }
+
+/* ── FOOTER ────────────────────────────────────────────────────── */
+footer { padding:26px 80px; border-top:1px solid var(--rule); display:flex; align-items:center; justify-content:space-between; }
+.fm { font-family:var(--serif); font-size:12px; font-weight:500; letter-spacing:-.02em; color:var(--ink4); }
+.fc { font-family:var(--mono); font-size:7px; font-weight:300; letter-spacing:.14em; color:rgba(236,234,232,.07); }
+.fl { display:flex; gap:24px; list-style:none; }
+.fl a { font-family:var(--mono); font-size:7px; font-weight:300; letter-spacing:.16em; text-transform:uppercase; color:rgba(236,234,232,.1); text-decoration:none; transition:color .25s; }
+.fl a:hover{color:var(--ink3)}
+
+/* ── PROBLEM SECTION — 3 ACTS ──────────────────────────────────── */
+
+/* ACT 1 — The question */
+.prob-act-1 { background:var(--bg); border-top:1px solid var(--rule); padding:140px 0 100px; }
+.prob-q { max-width:700px; }
+.prob-q-h { font-family:var(--serif); font-size:clamp(30px,4vw,54px); font-weight:700; letter-spacing:-.048em; line-height:1.03; margin:16px 0 28px; }
+.prob-q-h em { font-style:italic; font-weight:400; color:var(--ink2); }
+.prob-q-p { font-family:var(--serif); font-size:15px; font-weight:400; line-height:1.9; color:var(--ink2); max-width:580px; margin-bottom:44px; }
+.prob-q-signals { display:flex; flex-direction:column; gap:12px; }
+.prob-signal { display:flex; align-items:baseline; gap:12px; }
+.ps-mark { font-family:var(--mono); font-size:10px; flex-shrink:0; }
+.ps-red { color:var(--gsr); opacity:.7; }
+.prob-signal span { font-family:var(--serif); font-size:15px; font-style:italic; color:var(--ink2); line-height:1.5; }
+
+/* ACT 2 — Before/after */
+.prob-act-2 { background:var(--bg1); border-top:1px solid var(--rule); border-bottom:1px solid var(--rule); padding:100px 0; }
+.prob-bridge { margin-bottom:72px; }
+.pb-tag { font-family:var(--mono); font-size:9px; font-weight:300; letter-spacing:.28em; text-transform:uppercase; color:var(--gold); opacity:.7; margin-bottom:18px; }
+.pb-h { font-family:var(--serif); font-size:clamp(22px,2.8vw,36px); font-weight:700; letter-spacing:-.04em; line-height:1.1; margin-bottom:18px; }
+.pb-h em { font-style:italic; font-weight:400; color:var(--ink2); }
+.pb-p { font-family:var(--serif); font-size:14.5px; font-weight:400; line-height:1.88; color:var(--ink2); max-width:600px; }
+
+.prob-compare { display:grid; grid-template-columns:1fr 52px 1fr; gap:0; align-items:start; }
+
+.pc2 { display:flex; flex-direction:column; gap:0; }
+.pc2-head { padding-bottom:16px; }
+.pc2-tag { font-family:var(--mono); font-size:7.5px; font-weight:300; letter-spacing:.22em; text-transform:uppercase; padding:6px 12px; display:inline-block; border:1px solid var(--rule); }
+.pc2-tag-bad  { color:rgba(176,72,56,.65); border-color:rgba(176,72,56,.18); background:rgba(176,72,56,.04); }
+.pc2-tag-good { color:rgba(100,168,100,.65); border-color:rgba(100,168,100,.18); background:rgba(100,168,100,.04); }
+
+.prob-chat { display:flex; flex-direction:column; gap:14px; padding:20px; background:var(--bg); border:1px solid var(--rule); margin-bottom:0; }
+.chat-msg { display:flex; flex-direction:column; gap:4px; }
+.chat-msg.arch { align-items:flex-end; }
+.chat-bubble { font-family:var(--serif); font-size:13px; font-weight:400; line-height:1.7; color:var(--ink2); padding:11px 15px; max-width:90%; border:1px solid var(--rule); }
+.chat-msg.client .chat-bubble { background:rgba(236,234,232,.03); border-radius:0 8px 8px 8px; }
+.chat-msg.arch   .chat-bubble { background:rgba(196,160,80,.04); border-color:rgba(196,160,80,.1); border-radius:8px 0 8px 8px; color:var(--ink3); }
+.chat-meta { font-family:var(--mono); font-size:6.5px; font-weight:300; letter-spacing:.16em; color:var(--ink4); padding:0 2px; }
+.chat-msg.arch .chat-meta { text-align:right; }
+
+.prob-data { padding:20px; background:var(--bg); border:1px solid var(--rule); display:flex; flex-direction:column; gap:0; }
+.pd-row { display:flex; align-items:baseline; justify-content:space-between; padding:9px 0; border-bottom:1px solid var(--rule); gap:16px; }
+.pd-row:last-of-type { border-bottom:none; }
+.pd-label { font-family:var(--mono); font-size:7.5px; font-weight:300; letter-spacing:.16em; color:var(--ink4); flex-shrink:0; }
+.pd-value { font-family:var(--mono); font-size:9.5px; font-weight:400; letter-spacing:.06em; color:var(--ink2); text-align:right; }
+.pd-value.gold { color:var(--gold); }
+.pd-bars { padding-top:14px; display:flex; flex-direction:column; gap:8px; }
+.pd-bar-row { display:flex; align-items:center; gap:10px; }
+.pd-bar-row span { font-family:var(--mono); font-size:7px; font-weight:300; letter-spacing:.1em; color:var(--ink4); width:56px; flex-shrink:0; }
+.pd-bar-row .pd-bar-n { width:24px; text-align:right; }
+.pd-bar-track { flex:1; height:1px; background:rgba(236,234,232,.045); }
+.pd-bar-fill { height:100%; transform-origin:left; transform:scaleX(0); transition:transform 1.4s var(--ease); }
+.pd-bar-fill.go { transform:scaleX(1); }
+
+.pc2-outcome { display:flex; flex-direction:column; gap:0; padding:0 20px 20px; background:var(--bg); border:1px solid var(--rule); border-top:none; }
+.po-row { display:flex; align-items:center; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--rule); }
+.po-row:last-child { border-bottom:none; }
+.po-label { font-family:var(--mono); font-size:7.5px; font-weight:300; letter-spacing:.14em; color:var(--ink4); }
+.po-val { font-family:var(--mono); font-size:9px; font-weight:400; letter-spacing:.08em; }
+.bad-val  { color:var(--gsr); }
+.good-val { color:#6aa868; }
+
+.pc2-div { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; padding-top:40px; }
+.pc2-div-line { width:1px; flex:1; background:var(--rule); }
+.pc2-div-glyph { font-family:var(--mono); font-size:9px; font-weight:300; letter-spacing:.1em; color:var(--ink4); }
+
+/* ACT 3 — Time & cost */
+.prob-act-3 { background:var(--bg); border-top:1px solid var(--rule); padding:120px 0; }
+.prob-cost { margin-bottom:72px; }
+
+.cost-grid { display:grid; grid-template-columns:1fr 1fr; gap:64px; align-items:start; margin-bottom:80px; }
+
+/* Timeline */
+.cost-panel { background:var(--bg1); border:1px solid var(--rule); padding:28px; }
+.cost-panel-head { font-family:var(--mono); font-size:7.5px; font-weight:300; letter-spacing:.22em; text-transform:uppercase; color:var(--ink4); margin-bottom:32px; }
+.tl-row { display:flex; align-items:center; gap:14px; margin-bottom:16px; }
+.tl-label { font-family:var(--mono); font-size:8px; font-weight:300; letter-spacing:.12em; color:var(--ink3); width:88px; flex-shrink:0; }
+.tl-track { flex:1; height:28px; background:rgba(236,234,232,.04); border:1px solid var(--rule); overflow:hidden; position:relative; }
+.tl-fill { height:100%; display:flex; transform-origin:left; transform:scaleX(0); transition:transform 1.2s var(--ease); }
+.tl-fill.go { transform:scaleX(1); }
+.tl-bad  { background:rgba(176,72,56,.12); border-right:1px solid rgba(176,72,56,.3); }
+.tl-good { background:rgba(100,168,100,.12); border-right:1px solid rgba(100,168,100,.3); }
+.tl-phases { display:flex; width:100%; }
+.tl-phase { font-family:var(--mono); font-size:5.5px; font-weight:300; letter-spacing:.08em; text-transform:uppercase; color:var(--ink4); display:flex; align-items:center; justify-content:center; border-right:1px solid rgba(236,234,232,.06); overflow:hidden; white-space:nowrap; padding:0 2px; }
+.tl-phase:last-child { border-right:none; }
+.tl-duration { font-family:var(--mono); font-size:9px; font-weight:400; letter-spacing:.08em; width:40px; text-align:right; flex-shrink:0; }
+.tl-saving { margin-top:24px; padding-top:20px; border-top:1px solid var(--rule); display:flex; align-items:center; justify-content:space-between; }
+.ts-label { font-family:var(--mono); font-size:7.5px; font-weight:300; letter-spacing:.18em; text-transform:uppercase; color:var(--ink4); }
+.ts-val { font-family:var(--mono); font-size:10px; font-weight:300; letter-spacing:.08em; color:#6aa868; }
+.ts-val strong { font-weight:500; }
+
+/* Cost metrics — 3-up cards */
+.cost-metrics { display:flex; flex-direction:column; gap:0; background:var(--bg1); border:1px solid var(--rule); }
+.cm-item { padding:28px; display:flex; flex-direction:column; gap:4px; }
+.cm-divider { height:1px; background:var(--rule); }
+.cm-num { font-family:var(--mono); font-size:28px; font-weight:300; letter-spacing:-.04em; line-height:1; }
+.cm-unit { font-family:var(--mono); font-size:8px; font-weight:300; letter-spacing:.16em; text-transform:uppercase; color:var(--ink3); margin-top:2px; }
+.cm-desc { font-family:var(--serif); font-size:12px; font-weight:400; line-height:1.6; color:var(--ink4); margin-top:4px; }
+.cm-arrow { font-size:16px; color:var(--ink4); margin:8px 0; line-height:1; }
+
+/* CTA */
+.prob-cta { text-align:center; padding-top:24px; display:flex; flex-direction:column; align-items:center; gap:28px; }
+.prob-cta-p { font-family:var(--serif); font-size:18px; font-style:italic; font-weight:400; color:var(--ink2); }
+
+/* ── PROCESS MINI-CANVASES ─────────────────────────────────────── */
+.pc-viz {
+  position:relative; height:80px; background:var(--bg); border:1px solid var(--rule);
+  margin-bottom:24px; overflow:hidden;
+}
+.pc-viz-lbl {
+  position:absolute; top:7px; left:9px; z-index:2;
+  font-family:var(--mono); font-size:6.5px; font-weight:300; letter-spacing:.18em; text-transform:uppercase;
+  color:var(--ink4); display:flex; align-items:center; gap:5px;
+}
+.pc-viz-dot { width:3px; height:3px; border-radius:50%; flex-shrink:0; animation:pulse 2s infinite; }
+.pc-canvas { position:absolute; inset:0; width:100%; height:100%; }
+
+/* ── SESSION FLOW ───────────────────────────────────────────────── */
+#session { background:var(--bg1); border-top:1px solid var(--rule); border-bottom:1px solid var(--rule); padding:160px 0; }
+
+.sess-intro { display:grid; grid-template-columns:1fr 1fr; gap:100px; align-items:start; margin-bottom:100px; }
+.sess-vs { display:flex; align-items:center; gap:24px; margin-top:36px; }
+.sess-vs-col { display:flex; flex-direction:column; gap:4px; }
+.sess-vs-n { font-family:var(--mono); font-size:32px; font-weight:300; letter-spacing:-.04em; line-height:1; }
+.sess-vs-l { font-family:var(--mono); font-size:7px; font-weight:300; letter-spacing:.2em; text-transform:uppercase; color:var(--ink4); }
+.sess-vs-div { font-family:var(--mono); font-size:18px; color:var(--ink4); }
+
+/* Timeline */
+.sess-timeline { position:relative; margin-bottom:80px; }
+.stl-track { position:absolute; top:16px; left:0; right:0; height:1px; background:var(--rule); z-index:0; }
+.stl-bar { position:absolute; top:0; left:0; height:1px; background:var(--gold); width:0; transition:width 2.5s var(--ease); opacity:.5; }
+.stl-bar.go { width:100%; }
+.stl-steps { display:grid; grid-template-columns:repeat(4,1fr); gap:0; position:relative; z-index:1; }
+
+.stl-step { padding:0 28px 0 0; display:flex; flex-direction:column; gap:8px; }
+.stl-step:last-child { padding-right:0; }
+.stl-node { position:relative; width:32px; height:32px; margin-bottom:16px; }
+.stl-node-ring {
+  position:absolute; inset:0; border-radius:50%;
+  border:1px solid var(--rule);
+  transition:border-color .5s;
+}
+.stl-step.active .stl-node-ring { border-color:rgba(196,160,80,.45); }
+.stl-node-dot {
+  position:absolute; width:8px; height:8px; border-radius:50%;
+  background:var(--ink4); top:50%; left:50%; transform:translate(-50%,-50%);
+  transition:background .5s, transform .5s var(--ease);
+}
+.stl-step.active .stl-node-dot { background:var(--gold); transform:translate(-50%,-50%) scale(1.3); }
+.stl-node-gold .stl-node-dot { background:var(--gold); }
+.stl-node-gold .stl-node-ring { border-color:rgba(196,160,80,.5); box-shadow:0 0 12px rgba(196,160,80,.12); }
+
+.stl-time { font-family:var(--mono); font-size:8px; font-weight:300; letter-spacing:.18em; color:var(--ink4); }
+.stl-label { font-family:var(--serif); font-size:15px; font-weight:600; letter-spacing:-.02em; }
+.stl-body { font-family:var(--serif); font-size:12.5px; font-weight:400; line-height:1.78; color:var(--ink2); }
+.stl-duration { font-family:var(--mono); font-size:9px; font-weight:300; letter-spacing:.12em; color:var(--gold); opacity:.7; margin-top:4px; }
+
+/* Session comparison bar */
+.sess-compare { background:var(--bg); border:1px solid var(--rule); padding:28px; }
+.sco-row { display:flex; align-items:center; gap:16px; margin-bottom:14px; }
+.sco-label { font-family:var(--mono); font-size:8px; font-weight:300; letter-spacing:.12em; color:var(--ink3); width:180px; flex-shrink:0; }
+.sco-track { flex:1; height:32px; background:rgba(236,234,232,.04); border:1px solid var(--rule); overflow:hidden; }
+.sco-fill { height:100%; display:flex; align-items:center; gap:0; transform-origin:left; transform:scaleX(0); transition:transform 1.4s var(--ease); }
+.sco-fill.go { transform:scaleX(1); }
+.sco-bad  { background:rgba(176,72,56,.1); border-right:1px solid rgba(176,72,56,.25); }
+.sco-good { background:rgba(100,168,100,.12); border-right:1px solid rgba(100,168,100,.3); }
+.sco-fill span { font-family:var(--mono); font-size:6px; font-weight:300; letter-spacing:.08em; text-transform:uppercase; color:var(--ink4); padding:0 8px; border-right:1px solid rgba(236,234,232,.05); white-space:nowrap; flex:1; overflow:hidden; text-overflow:clip; display:flex; align-items:center; justify-content:center; }
+.sco-dur { font-family:var(--mono); font-size:9.5px; font-weight:400; letter-spacing:.06em; width:52px; text-align:right; flex-shrink:0; }
+.sco-save { display:flex; align-items:center; justify-content:space-between; padding-top:18px; border-top:1px solid var(--rule); margin-top:6px; }
+
+/* ── CASE STUDIES ───────────────────────────────────────────────── */
+#cases { background:var(--bg); border-top:1px solid var(--rule); padding:160px 0; }
+.cs-intro { margin-bottom:100px; }
+.cs-intro-p { max-width:620px; margin-top:20px; }
+
+.cs-case { padding:80px 0; border-top:1px solid var(--rule); }
+.cs-case:first-of-type { border-top:none; }
+.cs-case-head { display:flex; align-items:flex-start; gap:40px; margin-bottom:52px; }
+.cs-case-n { font-family:var(--mono); font-size:60px; font-weight:300; letter-spacing:-.06em; color:var(--ink4); line-height:1; flex-shrink:0; }
+.cs-case-meta { display:flex; flex-direction:column; gap:14px; }
+.cs-case-tag { font-family:var(--mono); font-size:7.5px; font-weight:300; letter-spacing:.22em; text-transform:uppercase; padding:5px 12px; display:inline-block; border:1px solid var(--rule); align-self:flex-start; }
+.cs-case-h { font-family:var(--serif); font-size:clamp(22px,2.8vw,34px); font-weight:700; letter-spacing:-.042em; line-height:1.08; }
+.cs-case-h em { font-style:italic; font-weight:400; color:var(--ink2); }
+
+.cs-case-body { display:grid; grid-template-columns:1fr 380px; gap:80px; align-items:start; }
+.cs-case-alt .cs-case-body { grid-template-columns:380px 1fr; }
+.cs-p { font-family:var(--serif); font-size:14px; font-weight:400; line-height:1.9; color:var(--ink2); margin-bottom:14px; }
+
+/* Profile cards — residential */
+.cs-profiles { margin-top:32px; display:flex; flex-direction:column; gap:12px; }
+.cs-profile { padding:14px 16px; background:var(--bg1); border:1px solid var(--rule); display:flex; flex-direction:column; gap:6px; }
+.csp-label { font-family:var(--mono); font-size:7px; font-weight:300; letter-spacing:.22em; text-transform:uppercase; color:var(--ink4); }
+.csp-arch { font-family:var(--serif); font-size:14px; font-weight:600; letter-spacing:-.02em; }
+.csp-score { display:flex; align-items:center; gap:10px; }
+.csp-bar { height:2px; flex-shrink:0; }
+.csp-score span { font-family:var(--mono); font-size:8px; color:var(--ink4); }
+.csp-sub { font-family:var(--mono); font-size:7.5px; font-weight:300; letter-spacing:.12em; color:var(--ink4); }
+
+/* Highlights — commercial */
+.cs-highlights { margin-top:28px; display:flex; flex-direction:column; gap:14px; }
+.cs-hl { display:flex; align-items:baseline; gap:14px; padding:14px 0; border-top:1px solid var(--rule); }
+.cs-hl-n { font-family:var(--mono); font-size:24px; font-weight:300; letter-spacing:-.04em; flex-shrink:0; line-height:1; }
+.cs-hl-l { font-family:var(--serif); font-size:13px; font-weight:400; line-height:1.7; color:var(--ink2); }
+
+/* Education outcomes */
+.cs-educ-outcomes { margin-top:28px; display:flex; flex-direction:column; gap:0; }
+.cs-eo { display:flex; align-items:flex-start; gap:16px; padding:16px 0; border-top:1px solid var(--rule); }
+.cs-eo:first-child { border-top:none; padding-top:0; }
+.cs-eo-icon { font-size:14px; color:var(--ink4); flex-shrink:0; line-height:1.5; }
+.cs-eo-title { font-family:var(--serif); font-size:14px; font-weight:600; letter-spacing:-.02em; margin-bottom:4px; }
+.cs-eo-desc { font-family:var(--serif); font-size:13px; font-weight:400; line-height:1.72; color:var(--ink2); }
+
+/* Viz frame */
+.cs-viz-frame { background:var(--bg1); border:1px solid var(--rule); overflow:hidden; }
+.cvf-head { display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid var(--rule); }
+.cvf-tag { font-family:var(--mono); font-size:7px; font-weight:300; letter-spacing:.16em; color:var(--ink4); }
+.cvf-status { font-family:var(--mono); font-size:7px; font-weight:300; letter-spacing:.16em; color:var(--gold); opacity:.6; display:flex; align-items:center; gap:6px; }
+.cvf-dot { width:4px; height:4px; border-radius:50%; background:var(--gold); animation:pulse 2s infinite; flex-shrink:0; }
+.cvf-body { padding:0; position:relative; }
+.cvf-body canvas { display:block; width:100%!important; }
+.cvf-foot { padding:10px 14px; border-top:1px solid var(--rule); }
+.cvf-note { font-family:var(--mono); font-size:6.5px; font-weight:300; letter-spacing:.12em; color:var(--ink4); }
+
+/* ── RESPONSIVE ────────────────────────────────────────────────── */
+@media(max-width:1080px){
+  .prob-split { grid-template-columns:1fr; }
+  .prob-divider { display:none; }
+  .prob-col-bad { margin-bottom:32px; }
+  .prob-compare { grid-template-columns:1fr; }
+  .pc2-div { display:none; }
+  .pc2-bad { margin-bottom:32px; }
+  .cost-grid { grid-template-columns:1fr; gap:32px; }
+  .sess-intro { grid-template-columns:1fr; gap:32px; }
+  .stl-steps { grid-template-columns:1fr 1fr; gap:48px 32px; }
+  .stl-track { display:none; }
+  .cs-case-body { grid-template-columns:1fr; gap:48px; }
+  .cs-case-alt .cs-case-body { grid-template-columns:1fr; }
+  .cs-case-head { gap:20px; }
+  .cs-case-n { font-size:36px; }
+  .sco-label { width:120px; }
+  .W,nav,.sr,footer{padding-left:40px;padding-right:40px}
+  #hero{grid-template-columns:1fr}
+  #ht{padding-left:40px;padding-top:100px;z-index:12}
+  #hsc{position:absolute;inset:0;opacity:.18;pointer-events:none;z-index:1}
+  .sys-intro,.anh{grid-template-columns:1fr;gap:32px}
+  .nr{grid-template-columns:1fr;gap:40px}
+  .nr.alt{direction:ltr}
+  .proc{grid-template-columns:1fr 1fr}
+  .pc:nth-child(2n){border-right:none}
+  .ag{grid-template-columns:repeat(2,1fr)}
+  .ac:nth-child(2n){border-right:none}
+  .ac:nth-child(n+5){border-bottom:1px solid var(--rule)}
+  .ac:nth-child(n+7){border-bottom:none}
+  .frb2{grid-template-columns:1fr}
+  .frm{border-right:none;border-bottom:1px solid var(--rule)}
+  .ai{grid-template-columns:1fr;gap:24px}
+  .ain{text-align:left}.ail{text-align:left}
+}
+@media(max-width:640px){
+  .W,nav,.sr,footer{padding-left:24px;padding-right:24px}
+  #ht{padding-left:24px}
+  .sr{flex-direction:column}
+  .sc{border-right:none;border-bottom:1px solid var(--rule);padding:24px 0}
+  .sc:last-child{border-bottom:none;padding-left:0}
+  .ag{grid-template-columns:1fr}
+  .ac:nth-child(n){border-right:none;border-bottom:1px solid var(--rule)}
+  .ac:last-child{border-bottom:none}
+  .proc{grid-template-columns:1fr}
+  .pc{border-right:none;border-bottom:1px solid var(--rule);padding:36px 0}
+  .pc:last-child{border-bottom:none}
+  footer{flex-direction:column;gap:16px;text-align:center}
+  .cla{flex-direction:column;gap:18px}
+  .sa{display:none}
+}
+/* ── GOOEY TEXT MORPH ──────────────────────────────────────────── */
+#gooey-svg { position: absolute; width: 0; height: 0; overflow: hidden; }
+
+#gooey-stage {
+  position: relative;
+  display: inline-block;
+  /* wide enough for the longest phrase, tall enough to show text */
+  min-width: 18ch;
+  height: 1.1em;
+  vertical-align: bottom;
+  overflow: visible;
+}
+.gooey-t {
+  position: absolute;
+  left: 0;
+  top: 0;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  font-style: normal;
+  letter-spacing: inherit;
+  line-height: 1;
+  color: var(--ink);
+  white-space: nowrap;
+  user-select: none;
+  will-change: filter, opacity;
+}
+</style>
+</head>
+<body>
+
+<div id="CD"></div>
+<div id="CR"></div>
+<div id="PG"></div>
+
+<!-- NAV -->
+<nav id="NAV">
+  <a href="#" class="nl"><div class="nl-o"></div><span class="nl-t">The Measured Mind</span></a>
+  <ul>
+    <li><a href="#prob">The Problem</a></li>
+    <li><a href="#session">Session</a></li>
+    <li><a href="#sys">System</a></li>
+    <li><a href="#arch">Archetypes</a></li>
+    <li><a href="#an">Instrument</a></li>
+  </ul>
+</nav>
+
+<!-- HERO -->
+<section id="hero">
+  <div id="hg"></div>
+  <div id="hv"></div>
+
+  <div id="ht">
+    <div class="hew"><div class="hld"></div>Neuroaesthetic Architecture Platform</div>
+
+    <svg id="gooey-svg" aria-hidden="true" focusable="false">
+      <defs>
+        <filter id="gooey-filter">
+          <feColorMatrix in="SourceGraphic" type="matrix"
+            values="1 0 0 0 0
+                    0 1 0 0 0
+                    0 0 1 0 0
+                    0 0 0 255 -140"/>
+        </filter>
+      </defs>
+    </svg>
+
+    <h1 class="hh">Architecture,<br><em>measured through</em><br><span id="gooey-stage"><span class="gooey-t" id="gt1">the nervous system.</span><span class="gooey-t" id="gt2">galvanic response.</span></span></h1>
+    <div class="hr2"></div>
+    <p class="hp">The body responds to space before the mind can name it. We intercept that signal — and translate it into design intelligence.</p>
+    <div class="ha">
+      <a href="#arch" class="bf">Enter the System</a>
+      <a href="#sys" class="bg2">How it works <i>→</i></a>
+    </div>
+  </div>
+
+  <div id="hsc">
+    <div id="hsw">
+      <div class="sb tl"></div><div class="sb tr"></div>
+      <div class="sb bl"></div><div class="sb br"></div>
+      <div class="sa t">EQUIRECTANGULAR SPHERE · GAZE FIELD ACTIVE</div>
+      <div class="sa b">XUL ARCHITECTURE · SESSION 07 · SCENE 03/08</div>
+      <div class="sa l">GSR<br>PUPIL<br>GAZE</div>
+      <div class="sa r">120 Hz<br>ACTIVE<br>SYNC</div>
+      <!-- Hero sphere: sized by JS after load -->
+      <canvas id="hcv"></canvas>
+    </div>
+  </div>
+
+  <div class="hcn">v2.4.1 / 8 ARCHETYPES<br>BIOMETRIC SYNC NOMINAL</div>
+  <div class="hsc2"><div class="hssl"></div><div class="hslb">Scroll</div></div>
+</section>
+
+<!-- STRIP -->
+<div id="strip">
+  <div class="sr">
+    <div class="sc"><div class="scl">Biometric channels</div><div class="scv">3<span class="scu">active</span></div><div class="scs">GSR · pupil · gaze</div></div>
+    <div class="sc"><div class="scl">Gaze resolution</div><div class="scv">120<span class="scu">Hz</span></div><div class="scs">eye-tracking frame rate</div></div>
+    <div class="sc"><div class="scl">Spike threshold</div><div class="scv">2.2<span class="scu">σ</span></div><div class="scs">z-score critical moment</div></div>
+    <div class="sc"><div class="scl">Archetype precision</div><div class="scv">94<span class="scu">%</span></div><div class="scs">biometric match accuracy</div></div>
+  </div>
+</div>
+
+<!-- PROBLEM SECTION — 3 acts -->
+<section id="prob">
+
+  <!-- ACT I: The Question -->
+  <div class="prob-act-1">
+    <div class="W">
+      <div class="prob-q rv">
+        <div class="kk"><span class="kkb"></span>The Problem<span class="kkd"></span></div>
+        <h2 class="prob-q-h">Are you struggling to understand<br>what your client <em>actually</em> wants?</h2>
+        <p class="prob-q-p">You ask the right questions. You produce the moodboards. You refine the concepts. And yet — somewhere between their words and your drawings — something gets lost. The brief was never the problem. The language was.</p>
+        <div class="prob-q-signals">
+          <div class="prob-signal"><div class="ps-mark ps-red">✗</div><span>"It's close, but not quite right."</span></div>
+          <div class="prob-signal"><div class="ps-mark ps-red">✗</div><span>"Can we try something warmer?"</span></div>
+          <div class="prob-signal"><div class="ps-mark ps-red">✗</div><span>"I'll know it when I see it."</span></div>
+          <div class="prob-signal"><div class="ps-mark ps-red">✗</div><span>"We love it — but can we start over?"</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ACT II: The offer — before/after -->
+  <div class="prob-act-2">
+    <div class="W">
+      <div class="prob-bridge rv">
+        <div class="pb-tag">If so — we can help.</div>
+        <h3 class="pb-h">The Measured Mind gives you a shared language<br>built not from words, but from <em>biology.</em></h3>
+        <p class="pb-p">A single VR session replaces months of iterative moodboarding. Your client's nervous system tells you — with precision — exactly what kind of space they instinctively seek. You design for a physiological truth, not a verbal approximation.</p>
+      </div>
+
+      <div class="prob-compare rv d1">
+        <!-- Before -->
+        <div class="pc2 pc2-bad">
+          <div class="pc2-head">
+            <div class="pc2-tag pc2-tag-bad">Conventional method</div>
+          </div>
+          <div class="prob-chat">
+            <div class="chat-msg client">
+              <div class="chat-bubble">"Warm. Cosy. Like a Scandi thing — you know?"</div>
+              <div class="chat-meta">Client · initial brief</div>
+            </div>
+            <div class="chat-msg arch">
+              <div class="chat-bubble">"We'll explore natural materials and considered lighting."</div>
+              <div class="chat-meta">Architect · interpretation</div>
+            </div>
+            <div class="chat-msg client">
+              <div class="chat-bubble">"Hmm — more intimate. And maybe more light. I'm not sure."</div>
+              <div class="chat-meta">Client · revision 01</div>
+            </div>
+            <div class="chat-msg arch">
+              <div class="chat-bubble">"Another round of moodboards coming your way."</div>
+              <div class="chat-meta">Architect · revision 02</div>
+            </div>
+          </div>
+          <div class="pc2-outcome bad-outcome">
+            <div class="po-row"><span class="po-label">Rounds of revision</span><span class="po-val bad-val">3–6 rounds</span></div>
+            <div class="po-row"><span class="po-label">Time to approved brief</span><span class="po-val bad-val">8–14 weeks</span></div>
+            <div class="po-row"><span class="po-label">Brief accuracy</span><span class="po-val bad-val">~40%</span></div>
+            <div class="po-row"><span class="po-label">Client satisfaction</span><span class="po-val bad-val">Uncertain</span></div>
+          </div>
+        </div>
+
+        <!-- Divider -->
+        <div class="pc2-div">
+          <div class="pc2-div-line"></div>
+          <div class="pc2-div-glyph">vs</div>
+          <div class="pc2-div-line"></div>
+        </div>
+
+        <!-- After -->
+        <div class="pc2 pc2-good">
+          <div class="pc2-head">
+            <div class="pc2-tag pc2-tag-good">The Measured Mind</div>
+          </div>
+          <div class="prob-data">
+            <div class="pd-row"><div class="pd-label">Primary archetype</div><div class="pd-value gold">The Cocooner</div></div>
+            <div class="pd-row"><div class="pd-label">Peak GSR response</div><div class="pd-value" style="color:var(--gsr)">Scene 04 · intimate scale</div></div>
+            <div class="pd-row"><div class="pd-label">Gaze dwell — longest</div><div class="pd-value" style="color:var(--gaze)">Warm threshold zones</div></div>
+            <div class="pd-row"><div class="pd-label">Pupil peak</div><div class="pd-value" style="color:var(--pup)">Diffused light, timber</div></div>
+            <div class="pd-bars" style="margin-top:12px">
+              <div class="pd-bar-row"><span>Cocooner</span><div class="pd-bar-track"><div class="pd-bar-fill" style="width:88%;background:var(--pup)"></div></div><span class="pd-bar-n">88</span></div>
+              <div class="pd-bar-row"><span>Sanctuary</span><div class="pd-bar-track"><div class="pd-bar-fill" style="width:61%;background:var(--gaze)"></div></div><span class="pd-bar-n">61</span></div>
+              <div class="pd-bar-row"><span>Naturalist</span><div class="pd-bar-track"><div class="pd-bar-fill" style="width:44%;background:var(--gold)"></div></div><span class="pd-bar-n">44</span></div>
+            </div>
+          </div>
+          <div class="pc2-outcome good-outcome">
+            <div class="po-row"><span class="po-label">Rounds of revision</span><span class="po-val good-val">0–1 rounds</span></div>
+            <div class="po-row"><span class="po-label">Time to approved brief</span><span class="po-val good-val">1–2 weeks</span></div>
+            <div class="po-row"><span class="po-label">Brief accuracy</span><span class="po-val good-val">94%</span></div>
+            <div class="po-row"><span class="po-label">Client satisfaction</span><span class="po-val good-val">Measured</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ACT III: Time & cost comparison -->
+  <div class="prob-act-3">
+    <div class="W">
+      <div class="prob-cost rv">
+        <div class="kk"><span class="kkb"></span>Time &amp; Cost<span class="kkd"></span></div>
+        <h3 class="pb-h">How much does misunderstanding<br>actually <em>cost you?</em></h3>
+      </div>
+
+      <div class="cost-grid rv d1">
+
+        <!-- Timeline comparison — horizontal bars -->
+        <div class="cost-panel">
+          <div class="cost-panel-head">Project brief timeline</div>
+
+          <div class="tl-row">
+            <div class="tl-label">Conventional</div>
+            <div class="tl-track">
+              <div class="tl-fill tl-bad" style="width:100%" id="tl-conv">
+                <div class="tl-phases">
+                  <div class="tl-phase" style="width:14%">Brief</div>
+                  <div class="tl-phase" style="width:22%">Moodboards</div>
+                  <div class="tl-phase" style="width:20%">Rev 1</div>
+                  <div class="tl-phase" style="width:18%">Rev 2</div>
+                  <div class="tl-phase" style="width:16%">Rev 3</div>
+                  <div class="tl-phase" style="width:10%">Sign</div>
+                </div>
+              </div>
+            </div>
+            <div class="tl-duration bad-val">14 wks</div>
+          </div>
+
+          <div class="tl-row">
+            <div class="tl-label">Measured Mind</div>
+            <div class="tl-track">
+              <div class="tl-fill tl-good" style="width:14.3%" id="tl-mm">
+                <div class="tl-phases">
+                  <div class="tl-phase" style="width:50%">Session</div>
+                  <div class="tl-phase" style="width:50%">Brief</div>
+                </div>
+              </div>
+            </div>
+            <div class="tl-duration good-val">2 wks</div>
+          </div>
+
+          <div class="tl-saving">
+            <span class="ts-label">Time saved</span>
+            <span class="ts-val">Up to <strong>12 weeks</strong> per project</span>
+          </div>
+        </div>
+
+        <!-- Cost metrics -->
+        <div class="cost-metrics">
+
+          <div class="cm-item rv">
+            <div class="cm-num bad-val" id="cm-rounds">6</div>
+            <div class="cm-unit">revision rounds</div>
+            <div class="cm-desc">average without biometric briefing</div>
+            <div class="cm-arrow">↓</div>
+            <div class="cm-num good-val">0–1</div>
+            <div class="cm-unit">revision rounds</div>
+            <div class="cm-desc">with The Measured Mind</div>
+          </div>
+
+          <div class="cm-divider"></div>
+
+          <div class="cm-item rv d1">
+            <div class="cm-num bad-val">£8–22k</div>
+            <div class="cm-unit">wasted per project</div>
+            <div class="cm-desc">design time spent on misaligned revisions</div>
+            <div class="cm-arrow">↓</div>
+            <div class="cm-num good-val">£600</div>
+            <div class="cm-unit">per session</div>
+            <div class="cm-desc">full biometric archetype profile</div>
+          </div>
+
+          <div class="cm-divider"></div>
+
+          <div class="cm-item rv d2">
+            <div class="cm-num bad-val">~40%</div>
+            <div class="cm-unit">brief accuracy</div>
+            <div class="cm-desc">without physiological data</div>
+            <div class="cm-arrow">↓</div>
+            <div class="cm-num good-val">94%</div>
+            <div class="cm-unit">biometric precision</div>
+            <div class="cm-desc">archetype match confidence</div>
+          </div>
+
+        </div>
+
+      </div>
+
+      <div class="prob-cta rv d2">
+        <p class="prob-cta-p">One session. One physiological truth. Zero guesswork.</p>
+        <a href="#arch" class="bf">See the System →</a>
+      </div>
+
+    </div>
+  </div>
+
+</section>
+
+<!-- SYSTEM -->
+<section id="sys">
+  <div class="W">
+    <div class="sys-intro">
+      <div class="rv">
+        <div class="kk"><span class="kkb"></span>The System<span class="kkd"></span></div>
+        <h2 class="s-h2">Physiology as<br>a design instrument.</h2>
+      </div>
+      <p class="s-p rv d2">Every architectural space elicits an involuntary biological response. The Measured Mind intercepts that signal — transforming galvanic skin response, gaze trajectories, and pupil dynamics into a precise map of spatial preference.</p>
+    </div>
+
+    <div class="proc rv">
+      <div class="pc">
+        <span class="pcn">01</span>
+        <div class="pc-viz">
+          <div class="pc-viz-lbl"><span class="pc-viz-dot" style="background:var(--gaze)"></span>Gaze field · live</div>
+          <canvas id="pv-gaze" class="pc-canvas"></canvas>
+        </div>
+        <div class="pct">Gaze Capture</div>
+        <p class="pcb">120Hz eye-tracking records exact gaze coordinates across the VR panorama, building a precision spatial attention map in real time.</p>
+      </div>
+      <div class="pc">
+        <span class="pcn">02</span>
+        <div class="pc-viz">
+          <div class="pc-viz-lbl"><span class="pc-viz-dot" style="background:var(--gsr)"></span>GSR signal · live</div>
+          <canvas id="pv-gsr" class="pc-canvas"></canvas>
+        </div>
+        <div class="pct">Physiological Response</div>
+        <p class="pcb">GSR and pupil dilation capture the body's involuntary emotional reactions — the signals that precede conscious thought.</p>
+      </div>
+      <div class="pc">
+        <span class="pcn">03</span>
+        <div class="pc-viz">
+          <div class="pc-viz-lbl"><span class="pc-viz-dot" style="background:var(--pup)"></span>Critical moments · z-score</div>
+          <canvas id="pv-crit" class="pc-canvas"></canvas>
+        </div>
+        <div class="pct">Critical Moment Detection</div>
+        <p class="pcb">Z-score modelling against a rolling baseline identifies the precise instants when a space provokes a significant biological reaction.</p>
+      </div>
+      <div class="pc">
+        <span class="pcn">04</span>
+        <div class="pc-viz">
+          <div class="pc-viz-lbl"><span class="pc-viz-dot" style="background:var(--gold)"></span>Archetype score · normalised</div>
+          <canvas id="pv-arch" class="pc-canvas"></canvas>
+        </div>
+        <div class="pct">Archetype Classification</div>
+        <p class="pcb">Biometric scores at 1.0× weight, questionnaire at 0.5× — normalised across eight archetypes to produce a precise spatial profile.</p>
+      </div>
+    </div>
+
+    <div class="narr">
+      <div class="nr rv">
+        <div>
+          <span class="nrn">LAYER 01 — GAZE FIELD</span>
+          <h3 class="nrh">Where the eye<br><em>instinctively</em> lands.</h3>
+          <p class="nrp">Before any conscious evaluation, the eye is already drawn — to light, to depth, to threshold. Gaze-tracking captures this preverbal spatial attention with millisecond precision.</p>
+          <p class="nrp">Heatmaps accumulate across the equirectangular sphere, revealing which zones command sustained attention and which are dismissed without a second glance.</p>
+          <div class="nrs"><div class="nrsb" style="background:var(--gaze)"></div><span class="nrsl" style="color:var(--gaze)">Gaze tracking · 120 Hz</span></div>
+        </div>
+        <div class="panel">
+          <div class="pin"></div>
+          <div class="plb"><div class="pld" style="background:var(--gaze)"></div>Gaze field</div>
+          <div class="pcr ptr" style="color:var(--gaze);opacity:.38">LIVE</div>
+          <div class="pcr pbl">120 Hz · EQUIRECT</div>
+          <div class="pcr pbr">CH-GAZE</div>
+          <canvas id="cvgaze"></canvas>
+        </div>
+      </div>
+
+      <div class="nr alt rv">
+        <div>
+          <span class="nrn">LAYER 02 — PHYSIOLOGICAL SIGNAL</span>
+          <h3 class="nrh">The body speaks<br><em>before</em> the mind.</h3>
+          <p class="nrp">Galvanic skin response registers arousal as an electrical fluctuation in the skin. Pupil dilation signals cognitive and emotional load. Neither can be consciously controlled.</p>
+          <p class="nrp">Statistical z-score analysis identifies critical moments — the precise instants when a space provokes a measurable, significant biological reaction.</p>
+          <div class="nrs"><div class="nrsb" style="background:var(--gsr)"></div><span class="nrsl" style="color:var(--gsr)">GSR · pupil dilation · z &gt; 2.2σ</span></div>
+        </div>
+        <div class="panel">
+          <div class="pin"></div>
+          <div class="plb"><div class="pld" style="background:var(--gsr)"></div>GSR oscilloscope</div>
+          <div class="pcr ptr" style="color:var(--gsr);opacity:.38">LIVE</div>
+          <div class="pcr pbl">μS · σ TRACE</div>
+          <div class="pcr pbr">CH-A</div>
+          <canvas id="cvgsr"></canvas>
+        </div>
+      </div>
+
+      <div class="nr rv">
+        <div>
+          <span class="nrn">LAYER 03 — ARCHETYPE MAPPING</span>
+          <h3 class="nrh">Eight classifications<br>of <em>spatial desire.</em></h3>
+          <p class="nrp">Decades of neuroaesthetic research distilled into eight archetypal spatial preferences. Each archetype defines a distinct physiological relationship between human perception and built environment.</p>
+          <p class="nrp">The highest-scoring archetype becomes the primary match — not a self-reported preference, but a physiological signature.</p>
+          <div class="nrs"><div class="nrsb" style="background:var(--pup)"></div><span class="nrsl" style="color:var(--pup)">Archetype scoring · −100 to +100</span></div>
+        </div>
+        <div class="panel">
+          <div class="pin"></div>
+          <div class="plb"><div class="pld" style="background:var(--pup)"></div>Archetype radar</div>
+          <div class="pcr ptr" style="color:var(--pup);opacity:.38">LIVE</div>
+          <div class="pcr pbl">8-AXIS POLAR</div>
+          <div class="pcr pbr">NORMALISED</div>
+          <canvas id="cvradar"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ARCHETYPES -->
+<section id="arch">
+  <div class="W">
+    <div class="ai rv">
+      <div>
+        <div class="kk"><span class="kkb"></span>Architectural Archetypes<span class="kkd"></span></div>
+        <h2 class="s-h2" style="margin-bottom:16px">Eight ways a body<br>inhabits space.</h2>
+        <p class="s-p" style="max-width:480px">Each archetype is a precise classification of spatial preference — derived from physiological response patterns, not aesthetic opinion. Your archetype is not chosen. It is measured.</p>
+      </div>
+      <div><div class="ain">08</div><div class="ail">Classified<br>archetypes</div></div>
+    </div>
+    <div class="ag rv d1">
+      <div class="ac"><div><span class="aci">01 — Naturalist</span><div class="acn">The Naturalist</div><div class="acd">Physiologically drawn to biophilic environments — spaces that mediate the boundary between interior and natural world. Strong GSR response to organic materials and daylighting.</div></div><span class="act">Biophilic · Organic</span></div>
+      <div class="ac"><div><span class="aci">02 — Explorer</span><div class="acn">The Explorer</div><div class="acd">Elevated arousal response to spatial complexity and thresholds. Gaze trajectories indicate active navigation behaviour — seeks layered depth and prospect over refuge.</div></div><span class="act">Spatial Complexity</span></div>
+      <div class="ac"><div><span class="aci">03 — Sanctuary Seeker</span><div class="acn">The Sanctuary Seeker</div><div class="acd">GSR stabilisation in enclosed, acoustically isolated environments. The parasympathetic response to protective spatial enclosure.</div></div><span class="act">Refuge · Enclosure</span></div>
+      <div class="ac"><div><span class="aci">04 — Social Showcaser</span><div class="acn">The Social Showcaser</div><div class="acd">Positive biometric response to spaces that facilitate observation and social performance. Pupil dilation increases with spatial grandeur.</div></div><span class="act">Social · Performative</span></div>
+      <div class="ac"><div><span class="aci">05 — Futurist</span><div class="acn">The Futurist</div><div class="acd">Sustained attention to parametric geometries and material innovation. Gaze lingers at structural interfaces — drawn to spaces that signal technological mastery.</div></div><span class="act">Parametric · Technological</span></div>
+      <div class="ac"><div><span class="aci">06 — Traditionalist</span><div class="acn">The Traditionalist</div><div class="acd">Physiological comfort response to historical material palettes, proportion systems, and classical spatial hierarchies.</div></div><span class="act">Classical · Proportional</span></div>
+      <div class="ac"><div><span class="aci">07 — Cocooner</span><div class="acn">The Cocooner</div><div class="acd">Strong biometric preference for intimate scale, textured softness, and low luminance. Parasympathetic activation in domestically scaled environments.</div></div><span class="act">Intimate · Sensory</span></div>
+      <div class="ac"><div><span class="aci">08 — Minimal Haven</span><div class="acn">The Minimal Haven</div><div class="acd">Cognitive clarity response to spatial reduction. Elimination of visual noise induces measurable calm. Gaze patterns become long and restful in uncluttered volumes.</div></div><span class="act">Reductive · Cognitive</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ANALYSIS -->
+<section id="an">
+  <div class="W">
+    <div class="anh">
+      <div class="rv">
+        <div class="kk"><span class="kkb"></span>Analysis Instrument<span class="kkd"></span></div>
+        <h2 class="s-h2">The instrument<br>in operation.</h2>
+      </div>
+      <p class="s-p rv d2">Real-time biometric streams, gaze heatmap accumulation on the spatial sphere, and live archetype scoring — synthesised into a single analytical surface.</p>
+    </div>
+
+    <div class="fr rv d1">
+      <div class="frb">
+        <div class="frd"><div class="frdot"></div><div class="frdot"></div><div class="frdot"></div></div>
+        <div class="frp">measured-mind · session · client-7f4a · scene 03/08 · The Futurist</div>
+        <div class="frs">Biometric active</div>
+      </div>
+      <div class="frb2">
+        <div class="frm">
+          <div class="frmh"><div class="frmhl">Gaze heatmap · equirectangular sphere</div><div class="frmhr">Scene 03 / 08</div></div>
+          <div class="frsa">
+            <!-- Explicit dimensions so JS can always read them -->
+            <canvas id="ansph" width="280" height="280"></canvas>
+          </div>
+        </div>
+        <div class="frs2">
+          <div class="bio">
+            <div class="bioh"><div class="bioid"><div class="biop" style="background:var(--gsr)"></div>GSR</div><div class="bior" style="color:var(--gsr)" id="rgsr">4.2<span class="biou">μS</span></div></div>
+            <div class="biow"><canvas id="wgsr"></canvas></div>
+          </div>
+          <div class="bio">
+            <div class="bioh"><div class="bioid"><div class="biop" style="background:var(--pup)"></div>Pupil</div><div class="bior" style="color:var(--pup)" id="rpup">3.8<span class="biou">mm</span></div></div>
+            <div class="biow"><canvas id="wpup"></canvas></div>
+          </div>
+          <div class="bio">
+            <div class="bioh"><div class="bioid"><div class="biop" style="background:var(--gaze)"></div>Gaze vel.</div><div class="bior" style="color:var(--gaze)" id="rgaz">12<span class="biou">°/s</span></div></div>
+            <div class="biow"><canvas id="wgaz"></canvas></div>
+          </div>
+          <div class="sp">
+            <div class="spl">Archetype scoring · live</div>
+            <div id="sprows"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div style="height:160px"></div>
+  </div>
+</section>
+
+<!-- SESSION FLOW -->
+<section id="session">
+  <div class="W">
+
+    <div class="sess-intro">
+      <div class="rv">
+        <div class="kk"><span class="kkb"></span>The Session<span class="kkd"></span></div>
+        <h2 class="s-h2">From stranger to understood<br>in <em>fifteen minutes.</em></h2>
+      </div>
+      <div class="rv d2">
+        <p class="s-p">A single, structured session replaces the open-ended back-and-forth of conventional briefing. The client experiences eight architectural environments in VR. The body responds without instruction. You receive a precise physiological brief.</p>
+      </div>
+    </div>
+
+    <!-- Session timeline — horizontal steps with animated progress -->
+    <div class="sess-timeline rv d1">
+      <div class="stl-track">
+        <div class="stl-bar" id="stl-progress"></div>
+      </div>
+
+      <div class="stl-steps">
+
+        <div class="stl-step" id="stl-1">
+          <div class="stl-node">
+            <div class="stl-node-ring"></div>
+            <div class="stl-node-dot"></div>
+          </div>
+          <div class="stl-time">0:00</div>
+          <div class="stl-label">Setup</div>
+          <div class="stl-body">Client is fitted with GSR sensors and eye-tracking hardware. Baseline biometric readings are established over 60 seconds of rest.</div>
+          <div class="stl-duration">~2 min</div>
+        </div>
+
+        <div class="stl-step" id="stl-2">
+          <div class="stl-node">
+            <div class="stl-node-ring"></div>
+            <div class="stl-node-dot"></div>
+          </div>
+          <div class="stl-time">2:00</div>
+          <div class="stl-label">VR Walkthrough</div>
+          <div class="stl-body">Client navigates 8 VR architectural scenes. Gaze, GSR, and pupil dilation are recorded continuously. No instruction is given — response is entirely involuntary.</div>
+          <div class="stl-duration">~5 min</div>
+        </div>
+
+        <div class="stl-step" id="stl-3">
+          <div class="stl-node">
+            <div class="stl-node-ring"></div>
+            <div class="stl-node-dot"></div>
+          </div>
+          <div class="stl-time">7:00</div>
+          <div class="stl-label">Questionnaire</div>
+          <div class="stl-body">A structured 12-question self-report instrument captures conscious spatial preference. Responses are weighted at 0.5× against biometric evidence.</div>
+          <div class="stl-duration">5–10 min</div>
+        </div>
+
+        <div class="stl-step" id="stl-4">
+          <div class="stl-node stl-node-gold">
+            <div class="stl-node-ring"></div>
+            <div class="stl-node-dot"></div>
+          </div>
+          <div class="stl-time" style="color:var(--gold)">15:00</div>
+          <div class="stl-label" style="color:var(--gold)">Archetype Report</div>
+          <div class="stl-body">Primary and secondary archetypes are calculated. A complete physiological brief is generated — ready for immediate use in design.</div>
+          <div class="stl-duration" style="color:var(--gold)">Instant</div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- CLOSING -->
+<section id="cl">
+  <div class="W">
+    <div class="clm rv"></div>
+    <h2 class="clh rv d1">Design informed<br>by the body's<br><em>own intelligence.</em></h2>
+    <p class="clp rv d2">The Measured Mind does not tell you what a space should feel like. It reveals what it already does — at a frequency below conscious thought.</p>
+    <div class="cla rv d3">
+      <!--
+        SECURE FORM — Request Access
+        ────────────────────────────────────────────────────────────
+        • Rate-limited via MMSecurity.checkRateLimit('access_request')
+        • All inputs validated via MMSecurity.validatePayload()
+        • No data is sent anywhere until you wire up /api/access-request
+          (see the fetch() guard in the Security Module above)
+        • Labels are programmatically associated for screen readers
+        ────────────────────────────────────────────────────────────
+        SERVER-SIDE TODO when you add the endpoint:
+          POST /api/access-request
+          Body: { email, name, practice }
+          Returns: { success: boolean, message: string }
+          Enforce server-side rate limit: 2 req / 5 min per IP
+          Store with parameterised queries only (no string concat)
+          Validate again server-side — never trust client validation alone
+      -->
+      <div id="access-form-wrap" style="display:flex;flex-direction:column;align-items:center;gap:0;width:100%;max-width:480px">
+        <div id="access-form-fields" style="display:flex;gap:10px;width:100%;justify-content:center;flex-wrap:wrap">
+          <div style="display:flex;flex-direction:column;gap:6px;flex:1;min-width:180px">
+            <label for="access-email" style="font-family:var(--mono);font-size:7px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink3);display:block">Work email</label>
+            <input
+              id="access-email"
+              type="email"
+              name="email"
+              autocomplete="email"
+              spellcheck="false"
+              maxlength="254"
+              placeholder="studio@practice.com"
+              aria-required="true"
+              style="
+                background:rgba(236,234,232,.05);
+                border:1px solid var(--rule);
+                color:var(--ink);
+                font-family:var(--mono);
+                font-size:11px;
+                font-weight:300;
+                letter-spacing:.06em;
+                padding:12px 16px;
+                outline:none;
+                width:100%;
+                transition:border-color .25s;
+              "
+            >
+          </div>
+          <button
+            id="access-submit"
+            type="button"
+            class="bf"
+            style="align-self:flex-end;flex-shrink:0;cursor:none"
+          >Request Access</button>
+        </div>
+        <!-- Accessible live region for feedback messages -->
+        <div
+          id="access-feedback"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          style="font-family:var(--mono);font-size:8px;font-weight:300;letter-spacing:.12em;margin-top:12px;min-height:18px;text-align:center;width:100%"
+        ></div>
+      </div>
+      <a href="#sys" class="bg2">Read the methodology <i>→</i></a>
+    </div>
+    <div class="clr rv d4"></div>
+    <div class="cln rv d4">XUL Architecture · Neuroaesthetics Research Division</div>
+  </div>
+</section>
+
+<footer>
+  <div class="fm">The Measured Mind.</div>
+  <div class="fc">© 2025 XUL Architecture. All rights reserved.</div>
+  <ul class="fl"><li><a href="#">Research</a></li><li><a href="#">System</a></li><li><a href="#">Privacy</a></li></ul>
+</footer>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════
+   SECURITY MODULE — loaded first, before any application code
+   ───────────────────────────────────────────────────────────────
+   Covers:
+     § 1  Input Validation & Sanitization
+     § 2  Rate Limiting (IP-keyed via localStorage + memory)
+     § 3  Safe DOM Utilities (XSS-safe alternatives to innerHTML)
+     § 4  API Key / Fetch Guard (enforces proxy-only pattern)
+     § 5  Global Error Boundary (prevents stack-trace leakage)
+   ───────────────────────────────────────────────────────────────
+   WASP references: A01 (broken access), A03 (injection),
+   A05 (misconfiguration), A07 (identification), A09 (logging)
+═══════════════════════════════════════════════════════════════ */
+
+(function MeasuredMindSecurity() {
+  'use strict';
+
+  /* ─────────────────────────────────────────────────────────────
+     § 1  INPUT VALIDATION & SANITIZATION
+     ─────────────────────────────────────────────────────────────
+     Schema-based validator. Each field definition specifies:
+       type    : 'string' | 'email' | 'integer' | 'boolean'
+       required: true | false
+       minLen  : minimum string length
+       maxLen  : maximum string length (hard ceiling)
+       pattern : optional regex the value must match
+       min/max : numeric bounds
+
+     sanitizeString() strips HTML tags and encodes dangerous chars
+     to prevent stored/reflected XSS before any value is used in
+     the DOM or sent to a server endpoint.
+  ─────────────────────────────────────────────────────────────── */
+
+  /**
+   * HTML-encode characters that would break out of text contexts.
+   * This is NOT a substitute for a CSP; it's a second line of defence.
+   * @param {string} raw - untrusted input
+   * @returns {string} safe string, all HTML special chars encoded
+   */
+  function sanitizeString(raw) {
+    if (typeof raw !== 'string') return '';
+    return raw
+      .replace(/&/g,  '&amp;')
+      .replace(/</g,  '&lt;')
+      .replace(/>/g,  '&gt;')
+      .replace(/"/g,  '&quot;')
+      .replace(/'/g,  '&#x27;')
+      .replace(/\//g, '&#x2F;')
+      // Strip null bytes (common in injection payloads)
+      .replace(/\0/g, '');
+  }
+
+  /**
+   * Schema-based field validator.
+   *
+   * @param {*}      value  - the raw value to validate
+   * @param {object} schema - field definition (see above)
+   * @returns {{ ok: boolean, error: string|null, value: * }}
+   */
+  function validateField(value, schema) {
+    const { type = 'string', required = false,
+            minLen = 0, maxLen = 500,
+            pattern, min, max, allowedValues } = schema;
+
+    // Presence check
+    if (required && (value === null || value === undefined || value === '')) {
+      return { ok: false, error: 'This field is required.' };
+    }
+    if (!required && (value === null || value === undefined || value === '')) {
+      return { ok: true, error: null, value: '' };
+    }
+
+    switch (type) {
+      case 'string': {
+        const s = String(value);
+        if (s.length < minLen)  return { ok: false, error: `Minimum ${minLen} characters required.` };
+        if (s.length > maxLen)  return { ok: false, error: `Maximum ${maxLen} characters allowed.` };
+        if (pattern && !pattern.test(s)) return { ok: false, error: 'Invalid format.' };
+        if (allowedValues && !allowedValues.includes(s)) return { ok: false, error: 'Value not permitted.' };
+        return { ok: true, error: null, value: sanitizeString(s) };
+      }
+      case 'email': {
+        const s = String(value).trim().toLowerCase();
+        // RFC 5321 practical limit: 254 chars
+        if (s.length > 254) return { ok: false, error: 'Email address too long.' };
+        // Strict email pattern — no + tricks into subdomains
+        const EMAIL_RE = /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/;
+        if (!EMAIL_RE.test(s)) return { ok: false, error: 'Invalid email address.' };
+        return { ok: true, error: null, value: sanitizeString(s) };
+      }
+      case 'integer': {
+        const n = parseInt(value, 10);
+        if (isNaN(n)) return { ok: false, error: 'Must be a whole number.' };
+        if (min !== undefined && n < min) return { ok: false, error: `Minimum value is ${min}.` };
+        if (max !== undefined && n > max) return { ok: false, error: `Maximum value is ${max}.` };
+        return { ok: true, error: null, value: n };
+      }
+      case 'boolean': {
+        return { ok: true, error: null, value: Boolean(value) };
+      }
+      default:
+        return { ok: false, error: 'Unknown field type.' };
+    }
+  }
+
+  /**
+   * Validate an entire form payload against a schema map.
+   * Rejects unexpected fields (allowlist approach).
+   *
+   * @param {object} payload        - key/value pairs from a form
+   * @param {object} schemaMap      - { fieldName: fieldSchema, … }
+   * @returns {{ ok: boolean, errors: object, clean: object }}
+   */
+  function validatePayload(payload, schemaMap) {
+    const errors = {};
+    const clean  = {};
+
+    // Reject unexpected fields — allowlist only
+    const knownFields = new Set(Object.keys(schemaMap));
+    for (const key of Object.keys(payload)) {
+      if (!knownFields.has(key)) {
+        errors[key] = 'Unexpected field rejected.';
+      }
+    }
+
+    for (const [field, schema] of Object.entries(schemaMap)) {
+      const result = validateField(payload[field], schema);
+      if (!result.ok) {
+        errors[field] = result.error;
+      } else {
+        clean[field] = result.value;
+      }
+    }
+
+    return { ok: Object.keys(errors).length === 0, errors, clean };
+  }
+
+  /* ─────────────────────────────────────────────────────────────
+     § 2  RATE LIMITING
+     ─────────────────────────────────────────────────────────────
+     Token-bucket algorithm, stored in localStorage so limits
+     survive page reloads (appropriate for a single-page site).
+
+     Server-side note:
+     ▸ This client-side limiter guards UX and reduces abuse noise,
+       but a determined attacker can bypass it by clearing storage.
+     ▸ ALL form endpoints MUST enforce rate limiting server-side:
+         - IP-based:  ≤ 10 requests / 15 min per IP
+         - User-based (if authenticated): ≤ 5 requests / min
+         - Global:    use a distributed cache (Redis) for shared
+                      state across multiple server instances
+         - Return HTTP 429 with Retry-After header on breach.
+         - Recommended library: express-rate-limit + rate-limit-redis
+     ▸ Consider implementing exponential back-off for repeated
+       violations (double the window on each consecutive breach).
+  ─────────────────────────────────────────────────────────────── */
+
+  const RATE_LIMITS = {
+    // action key        : { capacity, refillRate per second, storageKey }
+    'form_submission'   : { capacity: 3,  refillPerSec: 1/60,  key: 'mm_rl_form'    },
+    'access_request'    : { capacity: 2,  refillPerSec: 1/300, key: 'mm_rl_access'  },
+    'waitlist_signup'   : { capacity: 5,  refillPerSec: 1/120, key: 'mm_rl_waitlist' },
+  };
+
+  /**
+   * Token-bucket rate limiter.
+   * @param {string} action - key from RATE_LIMITS
+   * @returns {{ allowed: boolean, retryAfterSeconds: number }}
+   */
+  function checkRateLimit(action) {
+    const cfg = RATE_LIMITS[action];
+    if (!cfg) {
+      console.warn('[Security] Unknown rate-limit action:', action);
+      return { allowed: false, retryAfterSeconds: 60 };
+    }
+
+    const now  = Date.now() / 1000; // seconds
+    let   bucket;
+
+    try {
+      bucket = JSON.parse(localStorage.getItem(cfg.key) || 'null');
+    } catch (_) {
+      bucket = null;
+    }
+
+    if (!bucket) {
+      // First visit — initialise full bucket
+      bucket = { tokens: cfg.capacity, lastRefill: now };
+    }
+
+    // Refill tokens based on elapsed time
+    const elapsed = Math.max(0, now - bucket.lastRefill);
+    bucket.tokens  = Math.min(cfg.capacity, bucket.tokens + elapsed * cfg.refillPerSec);
+    bucket.lastRefill = now;
+
+    if (bucket.tokens >= 1) {
+      bucket.tokens -= 1;
+      try { localStorage.setItem(cfg.key, JSON.stringify(bucket)); } catch (_) { /* storage full — ignore */ }
+      return { allowed: true, retryAfterSeconds: 0 };
+    }
+
+    // Tokens exhausted — calculate wait time
+    const retryAfterSeconds = Math.ceil((1 - bucket.tokens) / cfg.refillPerSec);
+    try { localStorage.setItem(cfg.key, JSON.stringify(bucket)); } catch (_) { /* ignore */ }
+    return { allowed: false, retryAfterSeconds };
+  }
+
+  /**
+   * Graceful 429-style handler. Disables the submit element and
+   * shows a human-readable message until the window expires.
+   * @param {HTMLElement} submitEl  - button / input[type=submit]
+   * @param {HTMLElement} feedbackEl - element to show the message in
+   * @param {number}      waitSecs   - seconds to wait
+   */
+  function enforceRateLimit(submitEl, feedbackEl, waitSecs) {
+    if (submitEl) submitEl.disabled = true;
+    const msg = `Too many requests. Please wait ${waitSecs} second${waitSecs !== 1 ? 's' : ''}.`;
+    if (feedbackEl) {
+      feedbackEl.textContent = msg;
+      feedbackEl.setAttribute('role', 'alert');
+      feedbackEl.style.color = '#b04838';
+    }
+    // Re-enable after the window expires
+    setTimeout(() => {
+      if (submitEl) submitEl.disabled = false;
+      if (feedbackEl) feedbackEl.textContent = '';
+    }, waitSecs * 1000);
+  }
+
+  /* ─────────────────────────────────────────────────────────────
+     § 3  SAFE DOM UTILITIES  (XSS prevention — OWASP A03)
+     ─────────────────────────────────────────────────────────────
+     RULE: Never use innerHTML / outerHTML / document.write with
+     any string that includes user-controlled content.
+     Use these helpers instead.
+  ─────────────────────────────────────────────────────────────── */
+
+  /**
+   * Create an element and set text content safely.
+   * @param {string} tag       - e.g. 'div', 'span'
+   * @param {object} attrs     - { className, id, style, … }
+   * @param {string} textContent
+   * @returns {HTMLElement}
+   */
+  function safeEl(tag, attrs = {}, textContent = '') {
+    const el = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (k === 'className') { el.className = v; }
+      else if (k === 'style') { Object.assign(el.style, v); }
+      else if (k === 'dataset') { Object.assign(el.dataset, v); }
+      // Only allow a known-safe subset of attributes
+      else if (['id','role','type','href','target','rel','disabled',
+                 'aria-label','aria-live','aria-atomic'].includes(k)) {
+        el.setAttribute(k, v);
+      }
+    }
+    if (textContent) el.textContent = textContent; // textContent is XSS-safe
+    return el;
+  }
+
+  /**
+   * Safely set text in an existing element.
+   * @param {string|HTMLElement} selectorOrEl
+   * @param {string} text
+   */
+  function safeText(selectorOrEl, text) {
+    const el = typeof selectorOrEl === 'string'
+      ? document.querySelector(selectorOrEl)
+      : selectorOrEl;
+    if (el) el.textContent = String(text);
+  }
+
+  /* ─────────────────────────────────────────────────────────────
+     § 4  API KEY / FETCH GUARD
+     ─────────────────────────────────────────────────────────────
+     Intercepts fetch() calls to enforce the proxy-only pattern.
+     Any request to an origin other than the current host is
+     blocked unless it is the explicitly allowlisted fonts CDN.
+     This prevents a future developer from accidentally hard-coding
+     a key and sending it directly from the browser.
+  ─────────────────────────────────────────────────────────────── */
+
+  // Origins that the page is explicitly permitted to call directly.
+  // Only CDNs for static assets — NO API endpoints here.
+  const ALLOWED_EXTERNAL_ORIGINS = new Set([
+    'https://fonts.googleapis.com',
+    'https://fonts.gstatic.com',
+  ]);
+
+  const _nativeFetch = window.fetch;
+  window.fetch = function guardedFetch(resource, init = {}) {
+    let url;
+    try {
+      url = new URL(resource, window.location.origin);
+    } catch (_) {
+      // Relative URL — always allowed
+      return _nativeFetch.call(this, resource, init);
+    }
+
+    const isCurrentOrigin = url.origin === window.location.origin;
+    const isAllowed        = isCurrentOrigin || ALLOWED_EXTERNAL_ORIGINS.has(url.origin);
+
+    if (!isAllowed) {
+      const err = new Error(
+        `[Security] fetch() to external origin "${url.origin}" blocked. ` +
+        'Route all external API calls through your server-side proxy. ' +
+        'Never expose API keys client-side.'
+      );
+      console.error(err.message);
+      return Promise.reject(err);
+    }
+
+    // Strip any Authorization header that was accidentally added
+    // (defence-in-depth — keys must never leave the server)
+    if (init.headers) {
+      const headers = new Headers(init.headers);
+      if (headers.has('Authorization')) {
+        console.error('[Security] Authorization header removed from client-side fetch. Move API key to server proxy.');
+        headers.delete('Authorization');
+        init = { ...init, headers };
+      }
+    }
+
+    return _nativeFetch.call(this, resource, init);
+  };
+
+  /* ─────────────────────────────────────────────────────────────
+     § 5  GLOBAL ERROR BOUNDARY  (information leakage prevention)
+     ─────────────────────────────────────────────────────────────
+     Unhandled errors can expose stack traces, file paths, and
+     internal logic to the user/console in production.
+     In production builds: replace console.error with a call to
+     your error-tracking service (Sentry, Datadog, etc.) and
+     suppress the raw message from end-users.
+  ─────────────────────────────────────────────────────────────── */
+
+  window.addEventListener('error', function(event) {
+    // Log sanitised details — never expose full stack to end users
+    const safe = {
+      message: event.message || 'Unknown error',
+      // Strip absolute file paths (expose only filename)
+      source: (event.filename || '').replace(/.*\//, ''),
+      line: event.lineno,
+      col: event.colno,
+      ts: new Date().toISOString(),
+    };
+    // In production: send safe to your error-tracking endpoint
+    // fetch('/api/client-errors', { method:'POST', body: JSON.stringify(safe) });
+    console.warn('[ErrorBoundary]', safe);
+    // Prevent raw error from surfacing in production UI
+    // event.preventDefault(); // ← uncomment in production
+  });
+
+  window.addEventListener('unhandledrejection', function(event) {
+    const msg = event.reason instanceof Error ? event.reason.message : String(event.reason);
+    console.warn('[ErrorBoundary] Unhandled promise rejection:', msg);
+    // event.preventDefault(); // ← uncomment in production
+  });
+
+  /* ─────────────────────────────────────────────────────────────
+     Expose the security API on a non-enumerable namespace so
+     application code can use it without it appearing in
+     Object.keys(window) or JSON.stringify(window).
+  ─────────────────────────────────────────────────────────────── */
+  Object.defineProperty(window, 'MMSecurity', {
+    value: Object.freeze({
+      sanitizeString,
+      validateField,
+      validatePayload,
+      checkRateLimit,
+      enforceRateLimit,
+      safeEl,
+      safeText,
+    }),
+    writable:     false,
+    enumerable:   false,  // hidden from for…in / Object.keys
+    configurable: false,
+  });
+
+})(); // end MeasuredMindSecurity IIFE
+
+
+/* ═══════════════════════════════════════════════════════════════
+   CURSOR
+═══════════════════════════════════════════════════════════════ */
+const CD=document.getElementById('CD'),CR=document.getElementById('CR');
+let mx=0,my=0,rx=0,ry=0;
+document.addEventListener('mousemove',e=>{mx=e.clientX;my=e.clientY;CD.style.left=mx+'px';CD.style.top=my+'px'});
+(function lp(){rx+=(mx-rx)*.1;ry+=(my-ry)*.1;CR.style.left=rx+'px';CR.style.top=ry+'px';requestAnimationFrame(lp)})();
+document.querySelectorAll('a,button,.ac,.pc').forEach(el=>{
+  el.addEventListener('mouseenter',()=>document.body.classList.add('hv'));
+  el.addEventListener('mouseleave',()=>document.body.classList.remove('hv'));
+});
+
+/* ═══════════════════════════════════════════════════════════════
+   GOOEY TEXT MORPH — inline in h1 third line
+   Pure blur+opacity crossfade — no SVG filter needed
+═══════════════════════════════════════════════════════════════ */
+(function(){
+  const TEXTS = [
+    'the nervous system.',
+    'galvanic response.',
+    'gaze trajectories.',
+    'pupil dilation.',
+    'biometric data.',
+    'involuntary signals.',
+    'the nervous system.',
+  ];
+  const MORPH_TIME = 1.0;  // seconds for each crossfade
+  const HOLD_TIME  = 2.4;  // seconds each phrase is fully visible
+
+  const el1 = document.getElementById('gt1');
+  const el2 = document.getElementById('gt2');
+  if (!el1 || !el2) return;
+
+  let idx      = 0;
+  let phase    = 'hold';   // 'hold' | 'morph'
+  let elapsed  = 0;
+  let prev     = Date.now();
+
+  // Set initial state: el1 fully visible, el2 invisible
+  function showEl1() {
+    el1.style.opacity = '1';
+    el1.style.filter  = 'blur(0px)';
+    el2.style.opacity = '0';
+    el2.style.filter  = 'blur(8px)';
+  }
+
+  function setMorph(f) {
+    // f goes 0→1: el2 comes in, el1 goes out
+    // Clamp f to avoid division by zero at extremes
+    const f2 = Math.max(f, 0.001);
+    const f1 = Math.max(1 - f, 0.001);
+
+    el2.style.opacity = String(Math.min(f * 1.4, 1));
+    el2.style.filter  = `blur(${Math.max(0, 8 - f * 10)}px)`;
+
+    el1.style.opacity = String(Math.max(0, 1 - f * 1.4));
+    el1.style.filter  = `blur(${Math.max(0, f * 10 - 2)}px)`;
+  }
+
+  function advance() {
+    // Promote el2 text to el1, load next into el2
+    idx = (idx + 1) % (TEXTS.length - 1); // -1 so we don't repeat the anchor
+    el1.textContent = TEXTS[idx];
+    el2.textContent = TEXTS[(idx + 1) % TEXTS.length];
+    showEl1();
+  }
+
+  // Initialise
+  el1.textContent = TEXTS[0];
+  el2.textContent = TEXTS[1];
+  showEl1();
+
+  function tick() {
+    requestAnimationFrame(tick);
+    const now = Date.now();
+    const dt  = (now - prev) / 1000;
+    prev = now;
+
+    elapsed += dt;
+
+    if (phase === 'hold') {
+      if (elapsed >= HOLD_TIME) {
+        elapsed = 0;
+        phase   = 'morph';
+      }
+    } else {
+      // morphing
+      const f = Math.min(elapsed / MORPH_TIME, 1);
+      setMorph(f);
+      if (f >= 1) {
+        advance();
+        elapsed = 0;
+        phase   = 'hold';
+      }
+    }
+  }
+
+  tick();
+})();
+
+/* ═══════════════════════════════════════════════════════════════
+   NAV + PROGRESS
+═══════════════════════════════════════════════════════════════ */
+const NAV=document.getElementById('NAV'),PG=document.getElementById('PG');
+window.addEventListener('scroll',()=>{
+  NAV.classList.toggle('s',scrollY>48);
+  PG.style.width=(scrollY/(document.body.scrollHeight-innerHeight)*100)+'%';
+},{passive:true});
+
+/* ═══════════════════════════════════════════════════════════════
+   REVEAL
+═══════════════════════════════════════════════════════════════ */
+new IntersectionObserver(
+  es=>es.forEach(e=>{if(e.isIntersecting)e.target.classList.add('on')}),
+  {threshold:.08}
+).observe.call(
+  new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting)e.target.classList.add('on')}),{threshold:.08}),
+  document.body // dummy — overwritten below
+);
+const revObs=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting)e.target.classList.add('on')}),{threshold:.08});
+document.querySelectorAll('.rv').forEach(el=>revObs.observe(el));
+
+/* ═══════════════════════════════════════════════════════════════
+   SCORE ROWS
+═══════════════════════════════════════════════════════════════ */
+const ARCHS=[{n:'Naturalist',v:72,c:'#6aa868'},{n:'Explorer',v:58,c:'#c29a38'},{n:'Sanctuary',v:31,c:'#4a88c2'},{n:'Futurist',v:45,c:'#9268b8'},{n:'Minimal',v:19,c:'#9ea098'}];
+const sprows=document.getElementById('sprows');
+/*
+ * SECURITY: replaced innerHTML template-literal (XSS risk) with
+ * explicit DOM construction. All values come from the static ARCHS
+ * array above, but this pattern is safe-by-default if the array
+ * ever becomes user-supplied data. MMSecurity.safeEl() is used for
+ * any element that could carry user input.
+ */
+ARCHS.forEach(a=>{
+  const d   = document.createElement('div'); d.className='spr';
+  const nm  = document.createElement('div'); nm.className='sprn';  nm.textContent=a.n;
+  const trk = document.createElement('div'); trk.className='sprt';
+  const fil = document.createElement('div'); fil.className='sprf';
+  fil.style.background=a.c; fil.style.width=a.v+'%';
+  trk.appendChild(fil);
+  const val = document.createElement('div'); val.className='sprv';  val.textContent=a.v;
+  d.appendChild(nm); d.appendChild(trk); d.appendChild(val);
+  sprows.appendChild(d);
+});
+new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting)document.querySelectorAll('.sprf').forEach(f=>f.classList.add('go'))}),{threshold:.3}).observe(sprows);
+
+/* ═══════════════════════════════════════════════════════════════
+   LIVE READOUT FLICKER
+═══════════════════════════════════════════════════════════════ */
+/*
+ * SECURITY: replaced innerHTML with textContent + safe child element.
+ * `unit` is always a hardcoded string at call sites, but using
+ * textContent / createElement is safe-by-construction if unit ever
+ * becomes dynamic or user-supplied in the future.
+ */
+function flicker(id,base,unit,rng){
+  const el=document.getElementById(id);if(!el)return;
+  // Pre-create the unit span once — safe, no user data
+  const span=document.createElement('span');
+  span.className='biou';
+  span.textContent=unit;   // textContent: XSS-safe
+  setInterval(()=>{
+    const num=(base+(Math.random()-.5)*rng).toFixed(1);
+    el.textContent=num;     // clears children, sets text only
+    el.appendChild(span);  // re-attach unit span
+  },800+Math.random()*400);
+}
+flicker('rgsr',4.2,'μS',1.1);flicker('rpup',3.8,'mm',0.5);flicker('rgaz',12,'°/s',3.5);
+
+/* ═══════════════════════════════════════════════════════════════
+   CANVAS SIZING UTILITY
+   getBoundingClientRect is reliable even at page-load time.
+   We also add a ResizeObserver for live updates.
+═══════════════════════════════════════════════════════════════ */
+function sizeCanvas(cv){
+  const r=cv.parentElement.getBoundingClientRect();
+  const w=Math.round(r.width)||cv.parentElement.offsetWidth||300;
+  const h=Math.round(r.height)||cv.parentElement.offsetHeight||200;
+  if(w>0&&h>0){cv.width=w;cv.height=h;}
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   WAVEFORM — bio channel oscilloscope
+═══════════════════════════════════════════════════════════════ */
+function makeWave(id,color,f1,f2,spikeP,noise){
+  const cv=document.getElementById(id);if(!cv)return;
+  const ctx=cv.getContext('2d');
+  let hist=[],t=0,spk=0,running=true;
+
+  function resize(){sizeCanvas(cv);}
+  resize();
+  new ResizeObserver(resize).observe(cv.parentElement);
+
+  function draw(){
+    if(!running)return;
+    const w=cv.width,h=cv.height;
+    if(w<2||h<2){t++;requestAnimationFrame(draw);return;}
+    ctx.clearRect(0,0,w,h);
+
+    // Graticule lines
+    ctx.strokeStyle='rgba(236,234,232,.035)';ctx.lineWidth=.5;
+    for(let i=1;i<4;i++){const y=h*i/4;ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke();}
+
+    if(Math.random()<spikeP)spk=2+Math.random()*3;
+    spk*=.88;
+    const sig=Math.sin(t*f1)*.26+Math.sin(t*f2)*.13+(Math.random()-.5)*noise+spk*.4;
+    hist.push(h/2-sig*h*.36);
+    if(hist.length>w)hist.shift();
+
+    // Fill
+    if(hist.length>1){
+      ctx.beginPath();hist.forEach((v,i)=>i===0?ctx.moveTo(i,v):ctx.lineTo(i,v));
+      ctx.lineTo(hist.length-1,h);ctx.lineTo(0,h);ctx.closePath();
+      ctx.fillStyle=color+'10';ctx.fill();
+    }
+
+    // Line
+    if(hist.length>1){
+      ctx.beginPath();hist.forEach((v,i)=>i===0?ctx.moveTo(i,v):ctx.lineTo(i,v));
+      ctx.strokeStyle=color;ctx.lineWidth=.9;ctx.globalAlpha=.65;ctx.stroke();ctx.globalAlpha=1;
+    }
+
+    // Spike markers
+    hist.forEach((v,i)=>{
+      if(h/2-v>h*.13){
+        ctx.beginPath();ctx.arc(i,v,1.8,0,Math.PI*2);ctx.fillStyle=color;ctx.globalAlpha=.75;ctx.fill();ctx.globalAlpha=1;
+        ctx.beginPath();ctx.arc(i,v,5,0,Math.PI*2);ctx.strokeStyle=color+'44';ctx.lineWidth=.55;ctx.stroke();
+      }
+    });
+    t++;requestAnimationFrame(draw);
+  }
+  requestAnimationFrame(draw);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   GAZE FIELD PANEL — phosphor persistence
+═══════════════════════════════════════════════════════════════ */
+function makeGazeField(id){
+  const cv=document.getElementById(id);if(!cv)return;
+  const ctx=cv.getContext('2d');
+  const pts=Array.from({length:5},()=>({x:Math.random(),y:Math.random(),vx:(Math.random()-.5)*.003,vy:(Math.random()-.5)*.003}));
+  let t=0;
+
+  function resize(){sizeCanvas(cv);}
+  resize();
+  new ResizeObserver(resize).observe(cv.parentElement);
+
+  function draw(){
+    const w=cv.width,h=cv.height;
+    if(w<2||h<2){t++;requestAnimationFrame(draw);return;}
+
+    // Phosphor persistence
+    ctx.fillStyle='rgba(9,8,10,.09)';ctx.fillRect(0,0,w,h);
+
+    // Graticule
+    ctx.strokeStyle='rgba(56,128,176,.04)';ctx.lineWidth=.5;
+    for(let i=1;i<8;i++){const x=w*i/8,y=h*i/8;ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.stroke();ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke();}
+
+    pts.forEach(p=>{
+      p.x+=p.vx;p.y+=p.vy;
+      if(p.x<0||p.x>1)p.vx*=-1;if(p.y<0||p.y>1)p.vy*=-1;
+      const bx=p.x*w,by=p.y*h,r=Math.min(w,h)*.18;
+      const g=ctx.createRadialGradient(bx,by,0,bx,by,r);
+      g.addColorStop(0,'rgba(56,128,176,.35)');g.addColorStop(.5,'rgba(56,128,176,.07)');g.addColorStop(1,'transparent');
+      ctx.beginPath();ctx.arc(bx,by,r,0,Math.PI*2);ctx.fillStyle=g;ctx.fill();
+    });
+
+    const sl=(t*1.1)%h;
+    ctx.strokeStyle='rgba(56,128,176,.05)';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(0,sl);ctx.lineTo(w,sl);ctx.stroke();
+
+    t++;requestAnimationFrame(draw);
+  }
+  requestAnimationFrame(draw);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   GSR OSCILLOSCOPE PANEL
+═══════════════════════════════════════════════════════════════ */
+function makeGsrPanel(id){
+  const cv=document.getElementById(id);if(!cv)return;
+  const ctx=cv.getContext('2d');
+  let hist=[],t=0,spk=0;
+
+  function resize(){sizeCanvas(cv);}
+  resize();
+  new ResizeObserver(resize).observe(cv.parentElement);
+
+  function draw(){
+    const w=cv.width,h=cv.height;
+    if(w<2||h<2){t++;requestAnimationFrame(draw);return;}
+    ctx.clearRect(0,0,w,h);
+
+    ctx.strokeStyle='rgba(176,72,56,.05)';ctx.lineWidth=.5;
+    for(let i=1;i<5;i++){const y=h*i/5;ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke();}
+
+    if(Math.random()<.016)spk=4+Math.random()*4;
+    spk*=.86;
+    const sig=Math.sin(t*.036)*.25+Math.sin(t*.011)*.14+(Math.random()-.5)*.11+spk*.44;
+    hist.push(h/2-sig*h*.37);
+    if(hist.length>w)hist.shift();
+
+    if(hist.length>1){
+      ctx.beginPath();hist.forEach((v,i)=>i===0?ctx.moveTo(i,v):ctx.lineTo(i,v));
+      ctx.lineTo(hist.length-1,h);ctx.lineTo(0,h);ctx.closePath();ctx.fillStyle='rgba(176,72,56,.04)';ctx.fill();
+      ctx.beginPath();hist.forEach((v,i)=>i===0?ctx.moveTo(i,v):ctx.lineTo(i,v));
+      ctx.strokeStyle='rgba(176,72,56,.6)';ctx.lineWidth=.9;ctx.stroke();
+    }
+
+    hist.forEach((v,i)=>{
+      if(h/2-v>h*.15){
+        ctx.beginPath();ctx.arc(i,v,2.2,0,Math.PI*2);ctx.fillStyle='rgba(176,72,56,.85)';ctx.fill();
+        ctx.beginPath();ctx.arc(i,v,6,0,Math.PI*2);ctx.strokeStyle='rgba(176,72,56,.22)';ctx.lineWidth=.6;ctx.stroke();
+      }
+    });
+    t++;requestAnimationFrame(draw);
+  }
+  requestAnimationFrame(draw);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   RADAR PANEL
+═══════════════════════════════════════════════════════════════ */
+function makeRadar(id){
+  const cv=document.getElementById(id);if(!cv)return;
+  const ctx=cv.getContext('2d');
+  const N=8,C=['#6aa868','#c29a38','#4a88c2','#b85040','#9268b8','#c09840','#489898','#909088'];
+  const sc=Array.from({length:N},()=>.2+Math.random()*.6),tg=[...sc];
+
+  function resize(){sizeCanvas(cv);}
+  resize();
+  new ResizeObserver(resize).observe(cv.parentElement);
+
+  function draw(){
+    const w=cv.width,h=cv.height;
+    if(w<2||h<2){requestAnimationFrame(draw);return;}
+    ctx.clearRect(0,0,w,h);
+    const cx=w/2,cy=h/2,r=Math.min(w,h)*.34;
+
+    [.25,.5,.75,1].forEach(f=>{
+      ctx.beginPath();
+      for(let i=0;i<=N;i++){const a=(i/N)*Math.PI*2-Math.PI/2;ctx.lineTo(cx+Math.cos(a)*r*f,cy+Math.sin(a)*r*f);}
+      ctx.closePath();ctx.strokeStyle='rgba(236,234,232,.048)';ctx.lineWidth=.5;ctx.stroke();
+    });
+    for(let i=0;i<N;i++){const a=(i/N)*Math.PI*2-Math.PI/2;ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(cx+Math.cos(a)*r,cy+Math.sin(a)*r);ctx.strokeStyle='rgba(236,234,232,.04)';ctx.lineWidth=.5;ctx.stroke();}
+
+    sc.forEach((s,i)=>{sc[i]+=(tg[i]-s)*.018;});
+    if(Math.random()<.005)tg[Math.floor(Math.random()*N)]=.15+Math.random()*.78;
+
+    ctx.beginPath();
+    sc.forEach((s,i)=>{const a=(i/N)*Math.PI*2-Math.PI/2;ctx.lineTo(cx+Math.cos(a)*r*s,cy+Math.sin(a)*r*s);});
+    ctx.closePath();ctx.strokeStyle='rgba(192,152,64,.28)';ctx.lineWidth=.8;ctx.stroke();ctx.fillStyle='rgba(192,152,64,.04)';ctx.fill();
+
+    sc.forEach((s,i)=>{const a=(i/N)*Math.PI*2-Math.PI/2;ctx.beginPath();ctx.arc(cx+Math.cos(a)*r*s,cy+Math.sin(a)*r*s,2.2,0,Math.PI*2);ctx.fillStyle=C[i];ctx.fill();});
+    requestAnimationFrame(draw);
+  }
+  requestAnimationFrame(draw);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   SPHERE HEATMAP — shared renderer for hero + analysis
+═══════════════════════════════════════════════════════════════ */
+function makeSphere(id,isHero){
+  const cv=document.getElementById(id);if(!cv)return;
+  const ctx=cv.getContext('2d');
+
+  // For hero: size from wrap div; for analysis: fixed by HTML attributes
+  function resize(){
+    if(isHero){
+      const wrap=document.getElementById('hsw');
+      const r=wrap.getBoundingClientRect();
+      const s=Math.round(Math.min(r.width,r.height))||500;
+      cv.width=s;cv.height=s;
+    }
+    // analysis canvas has width/height set in HTML, keep them
+  }
+  if(isHero){resize();window.addEventListener('resize',resize,{passive:true});}
+
+  // Build gaze point field
+  const clusters=[{a:.45,la:.18,n:isHero?80:65,dense:true},{a:2.85,la:-.22,n:isHero?55:45,dense:false},{a:5.1,la:.08,n:isHero?28:22,dense:false}];
+  const pts=[];
+  clusters.forEach(cl=>{
+    for(let i=0;i<cl.n;i++){
+      pts.push({a:cl.a+(Math.random()-.5)*(cl.dense?.6:.9),la:cl.la+(Math.random()-.5)*.38,w:Math.random()*(cl.dense?.9:.6)+.1});
+    }
+  });
+  const ambient=isHero?38:28;
+  for(let i=0;i<ambient;i++)pts.push({a:Math.random()*Math.PI*2,la:(Math.random()-.5)*Math.PI,w:Math.random()*.18});
+
+  const spikes=clusters.slice(0,2).map(c=>({...c}));
+  let t=0;
+
+  function draw(){
+    const W=cv.width,H=cv.height;
+    if(W<4||H<4){t++;requestAnimationFrame(draw);return;}
+    const cx=W/2,cy=H/2,r=Math.min(W,H)*(isHero?.44:.42);
+
+    ctx.clearRect(0,0,W,H);
+
+    // Globe base
+    const bg=ctx.createRadialGradient(cx,cy,0,cx,cy,r);
+    bg.addColorStop(0,'rgba(22,18,26,.88)');
+    bg.addColorStop(1,'rgba(9,8,10,.97)');
+    ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.fillStyle=bg;ctx.fill();
+
+    ctx.save();ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.clip();
+
+    // Wireframe
+    ctx.strokeStyle='rgba(196,160,80,.07)';ctx.lineWidth=.55;
+    for(let i=1;i<11;i++){
+      const lat=(i/11)*Math.PI-Math.PI/2,yr=cy+Math.sin(lat)*r,xr=Math.abs(Math.cos(lat)*r);
+      if(xr<1)continue;
+      ctx.beginPath();ctx.ellipse(cx,yr,xr,xr*.1,0,0,Math.PI*2);ctx.stroke();
+    }
+    const mN=18;
+    for(let i=0;i<mN;i++){
+      const ang=(i/mN)*Math.PI*2+t*.0025;
+      ctx.beginPath();
+      for(let j=0;j<=52;j++){const lat=(j/52)*Math.PI-Math.PI/2;j===0?ctx.moveTo(cx+Math.cos(lat)*Math.cos(ang)*r,cy+Math.sin(lat)*r):ctx.lineTo(cx+Math.cos(lat)*Math.cos(ang)*r,cy+Math.sin(lat)*r);}
+      ctx.stroke();
+    }
+
+    // Heatmap blobs
+    pts.forEach(p=>{
+      const ang=p.a+t*.0018;
+      const bx=cx+Math.cos(p.la)*Math.cos(ang)*r,by=cy+Math.sin(p.la)*r;
+      const sz=r*(.03+p.w*.1);
+      const g=ctx.createRadialGradient(bx,by,0,bx,by,sz);
+      g.addColorStop(0,`rgba(216,80,56,${p.w*.44})`);
+      g.addColorStop(.3,`rgba(216,152,48,${p.w*.18})`);
+      g.addColorStop(.7,`rgba(56,120,160,${p.w*.07})`);
+      g.addColorStop(1,'transparent');
+      ctx.beginPath();ctx.arc(bx,by,sz,0,Math.PI*2);ctx.fillStyle=g;ctx.fill();
+    });
+    ctx.restore();
+
+    // Limb
+    ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.strokeStyle='rgba(196,160,80,.11)';ctx.lineWidth=1;ctx.stroke();
+
+    // Tick ring
+    for(let i=0;i<36;i++){
+      const a=(i/36)*Math.PI*2,major=i%9===0,minor=i%3===0;
+      const len=major?9:minor?5.5:3;
+      ctx.beginPath();ctx.moveTo(cx+Math.cos(a)*r,cy+Math.sin(a)*r);ctx.lineTo(cx+Math.cos(a)*(r+len),cy+Math.sin(a)*(r+len));
+      ctx.strokeStyle=major?'rgba(196,160,80,.32)':minor?'rgba(196,160,80,.14)':'rgba(196,160,80,.07)';
+      ctx.lineWidth=major?1:.5;ctx.stroke();
+    }
+
+    // GSR spike event rings
+    spikes.forEach((sp,idx)=>{
+      const ang=sp.a+t*.0018;
+      const bx=cx+Math.cos(sp.la)*Math.cos(ang)*r*.82,by=cy+Math.sin(sp.la)*r*.82;
+      const pulse=.35+.65*Math.abs(Math.sin(t*.038+idx*Math.PI));
+      [10,18,26].forEach((rad,ri)=>{
+        ctx.beginPath();ctx.arc(bx,by,rad*pulse*.72,0,Math.PI*2);
+        ctx.strokeStyle=`rgba(216,80,56,${(.3-ri*.08)*pulse})`;ctx.lineWidth=.7;ctx.stroke();
+      });
+      ctx.beginPath();ctx.arc(bx,by,2.8,0,Math.PI*2);ctx.fillStyle='rgba(216,80,56,.85)';ctx.fill();
+      // Crosshair
+      ctx.strokeStyle=`rgba(216,80,56,${.15*pulse})`;ctx.lineWidth=.5;
+      ctx.beginPath();ctx.moveTo(bx-14,by);ctx.lineTo(bx+14,by);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(bx,by-14);ctx.lineTo(bx,by+14);ctx.stroke();
+    });
+
+    // Pupil dilation ring (hero only)
+    if(isHero){
+      const pdx=cx+r*.52,pdy=cy-r*.4;
+      const pd=.5+.5*Math.sin(t*.03);
+      ctx.beginPath();ctx.arc(pdx,pdy,8+pd*5,0,Math.PI*2);ctx.strokeStyle=`rgba(114,88,176,${.22*pd})`;ctx.lineWidth=.8;ctx.stroke();
+      ctx.beginPath();ctx.arc(pdx,pdy,3,0,Math.PI*2);ctx.fillStyle=`rgba(114,88,176,${.55+.45*pd})`;ctx.fill();
+    }
+
+    t++;requestAnimationFrame(draw);
+  }
+  // Defer first frame to ensure layout is complete
+  requestAnimationFrame(()=>requestAnimationFrame(draw));
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   PROCESS STEP MINI-CANVASES
+═══════════════════════════════════════════════════════════════ */
+
+// Step 01 — Gaze field: drifting attention blobs
+function makeProcGaze(id){
+  const cv=document.getElementById(id);if(!cv)return;
+  const ctx=cv.getContext('2d');
+  const pts=Array.from({length:4},()=>({x:Math.random(),y:Math.random(),vx:(Math.random()-.5)*.0025,vy:(Math.random()-.5)*.0025}));
+  let t=0;
+  function resize(){sizeCanvas(cv);}
+  resize();new ResizeObserver(resize).observe(cv.parentElement);
+  function draw(){
+    const w=cv.width,h=cv.height;if(w<2||h<2){requestAnimationFrame(draw);return;}
+    ctx.fillStyle='rgba(9,8,10,.12)';ctx.fillRect(0,0,w,h);
+    // grid
+    ctx.strokeStyle='rgba(56,128,176,.04)';ctx.lineWidth=.5;
+    for(let i=1;i<6;i++){const x=w*i/6;ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.stroke();}
+    for(let i=1;i<4;i++){const y=h*i/4;ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke();}
+    pts.forEach(p=>{
+      p.x+=p.vx;p.y+=p.vy;
+      if(p.x<0||p.x>1)p.vx*=-1;if(p.y<0||p.y>1)p.vy*=-1;
+      const bx=p.x*w,by=p.y*h,r=Math.min(w,h)*.22;
+      const g=ctx.createRadialGradient(bx,by,0,bx,by,r);
+      g.addColorStop(0,'rgba(56,128,176,.42)');g.addColorStop(.5,'rgba(56,128,176,.08)');g.addColorStop(1,'transparent');
+      ctx.beginPath();ctx.arc(bx,by,r,0,Math.PI*2);ctx.fillStyle=g;ctx.fill();
+    });
+    const sl=(t*1.2)%h;ctx.strokeStyle='rgba(56,128,176,.06)';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(0,sl);ctx.lineTo(w,sl);ctx.stroke();
+    t++;requestAnimationFrame(draw);
+  }
+  requestAnimationFrame(()=>requestAnimationFrame(draw));
+}
+
+// Step 02 — GSR signal: oscilloscope waveform
+function makeProcGSR(id){
+  const cv=document.getElementById(id);if(!cv)return;
+  const ctx=cv.getContext('2d');
+  let hist=[],t=0,spk=0;
+  function resize(){sizeCanvas(cv);}
+  resize();new ResizeObserver(resize).observe(cv.parentElement);
+  function draw(){
+    const w=cv.width,h=cv.height;if(w<2||h<2){t++;requestAnimationFrame(draw);return;}
+    ctx.clearRect(0,0,w,h);
+    ctx.strokeStyle='rgba(176,72,56,.04)';ctx.lineWidth=.5;
+    for(let i=1;i<4;i++){const y=h*i/4;ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke();}
+    if(Math.random()<.022)spk=3+Math.random()*4;spk*=.87;
+    const s=Math.sin(t*.04)*.28+Math.sin(t*.013)*.14+(Math.random()-.5)*.12+spk*.42;
+    hist.push(h/2-s*h*.38);if(hist.length>w)hist.shift();
+    if(hist.length>1){
+      ctx.beginPath();hist.forEach((v,i)=>i===0?ctx.moveTo(i,v):ctx.lineTo(i,v));
+      ctx.lineTo(hist.length-1,h);ctx.lineTo(0,h);ctx.closePath();ctx.fillStyle='rgba(176,72,56,.06)';ctx.fill();
+      ctx.beginPath();hist.forEach((v,i)=>i===0?ctx.moveTo(i,v):ctx.lineTo(i,v));
+      ctx.strokeStyle='rgba(176,72,56,.7)';ctx.lineWidth=.9;ctx.stroke();
+    }
+    hist.forEach((v,i)=>{
+      if(h/2-v>h*.16){ctx.beginPath();ctx.arc(i,v,2,0,Math.PI*2);ctx.fillStyle='rgba(176,72,56,.85)';ctx.fill();}
+    });
+    t++;requestAnimationFrame(draw);
+  }
+  requestAnimationFrame(()=>requestAnimationFrame(draw));
+}
+
+// Step 03 — Critical moment: z-score threshold trace
+function makeProcCrit(id){
+  const cv=document.getElementById(id);if(!cv)return;
+  const ctx=cv.getContext('2d');
+  let hist=[],zscore=[],t=0,spk=0;
+  function resize(){sizeCanvas(cv);}
+  resize();new ResizeObserver(resize).observe(cv.parentElement);
+  function draw(){
+    const w=cv.width,h=cv.height;if(w<2||h<2){t++;requestAnimationFrame(draw);return;}
+    ctx.clearRect(0,0,w,h);
+    // Threshold line at 2.2σ
+    const thY=h*.28;
+    ctx.setLineDash([4,4]);ctx.strokeStyle='rgba(114,88,176,.28)';ctx.lineWidth=.7;
+    ctx.beginPath();ctx.moveTo(0,thY);ctx.lineTo(w,thY);ctx.stroke();
+    ctx.setLineDash([]);
+    // Threshold label
+    ctx.fillStyle='rgba(114,88,176,.4)';ctx.font='300 7px JetBrains Mono';ctx.fillText('2.2σ',4,thY-4);
+    if(Math.random()<.018)spk=2.5+Math.random()*3.5;spk*=.88;
+    const base=Math.sin(t*.035)*.2+Math.sin(t*.011)*.1+(Math.random()-.5)*.1+spk*.5;
+    hist.push(base);
+    if(hist.length>w)hist.shift();
+    // Draw z-score as bar chart style
+    const barW=Math.max(1,w/hist.length);
+    hist.forEach((v,i)=>{
+      const barH=(v+.2)*h*.55;
+      const y=h-barH;
+      const isCrit=v>.35;
+      ctx.fillStyle=isCrit?'rgba(114,88,176,.7)':'rgba(56,128,176,.25)';
+      ctx.fillRect(i*barW,y,barW*.8,barH);
+      if(isCrit){
+        ctx.beginPath();ctx.arc(i*barW+barW*.4,y,2.5,0,Math.PI*2);
+        ctx.fillStyle='rgba(114,88,176,.9)';ctx.fill();
+      }
+    });
+    t++;requestAnimationFrame(draw);
+  }
+  requestAnimationFrame(()=>requestAnimationFrame(draw));
+}
+
+// Step 04 — Archetype classification: animated bar chart
+function makeProcArch(id){
+  const cv=document.getElementById(id);if(!cv)return;
+  const ctx=cv.getContext('2d');
+  const archs=[
+    {n:'Cocooner',  c:'#9268b8', v:.88, tv:.88},
+    {n:'Sanctuary', c:'#3880b0', v:.61, tv:.61},
+    {n:'Naturalist',c:'#c4a050', v:.44, tv:.44},
+    {n:'Explorer',  c:'#c29a38', v:.28, tv:.28},
+  ];
+  let t=0;
+  function resize(){sizeCanvas(cv);}
+  resize();new ResizeObserver(resize).observe(cv.parentElement);
+  function draw(){
+    const w=cv.width,h=cv.height;if(w<2||h<2){requestAnimationFrame(draw);return;}
+    ctx.clearRect(0,0,w,h);
+    // Animate slight shimmer
+    archs.forEach(a=>{
+      if(Math.random()<.004)a.tv=Math.max(.05,a.v+(Math.random()-.5)*.12);
+      a.v+=(a.tv-a.v)*.04;
+    });
+    const rowH=h/archs.length;
+    archs.forEach((a,i)=>{
+      const y=i*rowH+rowH*.25;
+      const bh=rowH*.4;
+      const bw=(w-52)*a.v;
+      // Label
+      ctx.fillStyle='rgba(236,234,232,.18)';
+      ctx.font='300 6.5px JetBrains Mono';
+      ctx.fillText(a.n,0,y+bh*.7);
+      // Bar track
+      ctx.fillStyle='rgba(236,234,232,.045)';
+      ctx.fillRect(46,y,w-52,bh);
+      // Bar fill
+      ctx.fillStyle=a.c;
+      ctx.globalAlpha=.65;
+      ctx.fillRect(46,y,bw,bh);
+      ctx.globalAlpha=1;
+      // Value
+      ctx.fillStyle=a.c;
+      ctx.font='300 7px JetBrains Mono';
+      ctx.fillText(Math.round(a.v*100),46+bw+4,y+bh*.7);
+    });
+    t++;requestAnimationFrame(draw);
+  }
+  requestAnimationFrame(()=>requestAnimationFrame(draw));
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   SESSION TIMELINE ANIMATION
+═══════════════════════════════════════════════════════════════ */
+function initSession(){
+  const bar=document.getElementById('stl-progress');
+  const steps=document.querySelectorAll('.stl-step');
+  // Animate bar + step nodes on intersect
+  const io=new IntersectionObserver(entries=>{
+    entries.forEach(e=>{
+      if(e.isIntersecting){
+        if(bar)bar.classList.add('go');
+        // Stagger step activation
+        steps.forEach((s,i)=>setTimeout(()=>s.classList.add('active'),i*600));
+        // Animate comparison bar fills
+        document.querySelectorAll('.sco-fill').forEach(f=>f.classList.add('go'));
+      }
+    });
+  },{threshold:.2});
+  const timeline=document.querySelector('.sess-timeline');
+  if(timeline)io.observe(timeline);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   CASE STUDY CANVASES
+═══════════════════════════════════════════════════════════════ */
+
+// Case 1 — Residential: two GSR traces diverging
+function makeCsResidential(id){
+  const cv=document.getElementById(id);if(!cv)return;
+  const ctx=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  let t=0,spkM=0,spkF=0;
+  const histM=[],histF=[];
+
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    // Background
+    ctx.fillStyle='rgba(15,14,16,.6)';ctx.fillRect(0,0,W,H);
+    // Graticule
+    ctx.strokeStyle='rgba(236,234,232,.035)';ctx.lineWidth=.5;
+    for(let i=1;i<5;i++){const y=H*i/5;ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
+
+    if(Math.random()<.012)spkM=3+Math.random()*2;spkM*=.9;
+    if(Math.random()<.02)spkF=4+Math.random()*3;spkF*=.87;
+
+    const sigM=Math.sin(t*.028)*.18+Math.sin(t*.009)*.1+(Math.random()-.5)*.08+spkM*.3;
+    const sigF=Math.sin(t*.044)*.25+Math.sin(t*.014)*.12+(Math.random()-.5)*.1+spkF*.38;
+
+    histM.push(H*.5-sigM*H*.32);histF.push(H*.5-sigF*H*.32);
+    if(histM.length>W)histM.shift();if(histF.length>W)histF.shift();
+
+    function drawLine(hist,col,alpha){
+      if(hist.length<2)return;
+      ctx.beginPath();hist.forEach((v,i)=>i===0?ctx.moveTo(i,v):ctx.lineTo(i,v));
+      ctx.strokeStyle=col;ctx.lineWidth=1;ctx.globalAlpha=alpha;ctx.stroke();ctx.globalAlpha=1;
+      // Fill
+      ctx.beginPath();hist.forEach((v,i)=>i===0?ctx.moveTo(i,v):ctx.lineTo(i,v));
+      ctx.lineTo(hist.length-1,H);ctx.lineTo(0,H);ctx.closePath();
+      ctx.fillStyle=col+'14';ctx.fill();
+    }
+    drawLine(histM,'#3880b0',.65); // Mother — gaze colour
+    drawLine(histF,'#c4a050',.65); // Father — gold
+
+    // Labels
+    ctx.font='300 9px JetBrains Mono';
+    ctx.fillStyle='rgba(56,128,176,.7)';ctx.fillText('Mother · Sanctuary Seeker',8,H-24);
+    ctx.fillStyle='rgba(196,160,80,.7)';ctx.fillText('Father · Explorer',8,H-10);
+
+    // Divergence marker at ~60% width
+    const mx=Math.floor(W*.6);
+    ctx.strokeStyle='rgba(236,234,232,.1)';ctx.lineWidth=.7;ctx.setLineDash([3,4]);
+    ctx.beginPath();ctx.moveTo(mx,0);ctx.lineTo(mx,H);ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.font='300 7px JetBrains Mono';ctx.fillStyle='rgba(236,234,232,.2)';
+    ctx.fillText('Scene 03',mx+4,14);
+
+    t++;requestAnimationFrame(draw);
+  }
+  requestAnimationFrame(()=>requestAnimationFrame(draw));
+}
+
+// Case 2 — Commercial: two radar polygons (worker vs public)
+function makeCsCommercial(id){
+  const cv=document.getElementById(id);if(!cv)return;
+  const ctx=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const N=8;
+  const WORKER=[.82,.45,.7,.38,.55,.48,.6,.3];
+  const PUBLIC=[.35,.72,.4,.85,.42,.65,.3,.55];
+  const wCur=WORKER.map(v=>v*.1);
+  const pCur=PUBLIC.map(v=>v*.1);
+
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    ctx.fillStyle='rgba(15,14,16,.6)';ctx.fillRect(0,0,W,H);
+    const cx=W/2,cy=H/2,r=Math.min(W,H)*.34;
+
+    wCur.forEach((v,i)=>{wCur[i]+=(WORKER[i]-v)*.025;});
+    pCur.forEach((v,i)=>{pCur[i]+=(PUBLIC[i]-v)*.025;});
+
+    // Graticule
+    [.33,.66,1].forEach(f=>{
+      ctx.beginPath();for(let i=0;i<=N;i++){const a=(i/N)*Math.PI*2-Math.PI/2;ctx.lineTo(cx+Math.cos(a)*r*f,cy+Math.sin(a)*r*f);}
+      ctx.closePath();ctx.strokeStyle='rgba(236,234,232,.045)';ctx.lineWidth=.5;ctx.stroke();
+    });
+    for(let i=0;i<N;i++){const a=(i/N)*Math.PI*2-Math.PI/2;ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(cx+Math.cos(a)*r,cy+Math.sin(a)*r);ctx.strokeStyle='rgba(236,234,232,.03)';ctx.lineWidth=.5;ctx.stroke();}
+
+    function drawPoly(sc,col,alpha){
+      ctx.beginPath();sc.forEach((s,i)=>{const a=(i/N)*Math.PI*2-Math.PI/2;ctx.lineTo(cx+Math.cos(a)*r*s,cy+Math.sin(a)*r*s);});
+      ctx.closePath();ctx.strokeStyle=col;ctx.lineWidth=1;ctx.globalAlpha=alpha*.8;ctx.stroke();
+      ctx.fillStyle=col;ctx.globalAlpha=alpha*.12;ctx.fill();ctx.globalAlpha=1;
+    }
+    drawPoly(wCur,'#7258b0',1);  // Worker — purple
+    drawPoly(pCur,'#3880b0',1);  // Public — gaze blue
+
+    ctx.font='300 8px JetBrains Mono';
+    ctx.fillStyle='rgba(114,88,176,.7)';ctx.fillText('Workers',8,H-24);
+    ctx.fillStyle='rgba(56,128,176,.7)';ctx.fillText('Public',8,H-10);
+    requestAnimationFrame(draw);
+  }
+  requestAnimationFrame(()=>requestAnimationFrame(draw));
+}
+
+// Case 3 — Education: archetype distribution bar chart
+function makeCsEducation(id){
+  const cv=document.getElementById(id);if(!cv)return;
+  const ctx=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  const ARCHS=[
+    {n:'Naturalist',c:'#6aa868',v:5},{n:'Explorer',c:'#c29a38',v:4},
+    {n:'Sanctuary',c:'#3880b0',v:3},{n:'Social',c:'#b85040',v:2},
+    {n:'Futurist',c:'#9268b8',v:4},{n:'Traditionalist',c:'#c4a050',v:2},
+    {n:'Cocooner',c:'#5aa8a2',v:3},{n:'Minimal',c:'#9ea098',v:1},
+  ];
+  const total=24;
+  const cur=ARCHS.map(()=>0);
+
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    ctx.fillStyle='rgba(15,14,16,.6)';ctx.fillRect(0,0,W,H);
+
+    cur.forEach((v,i)=>{cur[i]+=(ARCHS[i].v-v)*.04;});
+
+    const pad=12,barW=(W-pad*2)/ARCHS.length;
+    ARCHS.forEach((a,i)=>{
+      const pct=cur[i]/total;
+      const bh=pct*(H-48);
+      const x=pad+i*barW;
+      const y=H-24-bh;
+      ctx.fillStyle=a.c;ctx.globalAlpha=.55;
+      ctx.fillRect(x+barW*.15,y,barW*.7,bh);
+      ctx.globalAlpha=1;
+      // Count label
+      ctx.fillStyle=a.c;ctx.font='300 8px JetBrains Mono';
+      ctx.textAlign='center';
+      ctx.fillText(Math.round(cur[i]),x+barW/2,y-4);
+      // Name label
+      ctx.fillStyle='rgba(236,234,232,.2)';ctx.font='300 6px JetBrains Mono';
+      ctx.fillText(a.n.slice(0,5),x+barW/2,H-8);
+    });
+    ctx.textAlign='left';
+    requestAnimationFrame(draw);
+  }
+  requestAnimationFrame(()=>requestAnimationFrame(draw));
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   INIT
+═══════════════════════════════════════════════════════════════ */
+window.addEventListener('load',()=>{
+  // Spheres
+  makeSphere('hcv', true);   // hero
+  makeSphere('ansph', false); // analysis
+
+  // Panel canvases
+  makeGazeField('cvgaze');
+  makeGsrPanel('cvgsr');
+  makeRadar('cvradar');
+
+  // Bio channel waveforms
+  makeWave('wgsr',  '#b04838',.038,.013,.018,.14);
+  makeWave('wpup',  '#7258b0',.025,.009,.008,.09);
+  makeWave('wgaz',  '#3880b0',.055,.018,.025,.17);
+
+  // ── Process step mini-visuals ──────────────────────────────
+  // Step 01: Gaze field (persistence dots)
+  makeProcGaze('pv-gaze');
+  // Step 02: GSR waveform
+  makeProcGSR('pv-gsr');
+  // Step 03: Critical moment / z-score trace
+  makeProcCrit('pv-crit');
+  // Step 04: Archetype bar chart
+  makeProcArch('pv-arch');
+
+  // Session timeline
+  initSession();
+  // Archetype bars in before/after
+  const barObs = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if(e.isIntersecting) document.querySelectorAll('.pd-bar-fill').forEach(f=>f.classList.add('go'));
+    });
+  },{threshold:.3});
+  const pdBars = document.querySelector('.pd-bars');
+  if(pdBars) barObs.observe(pdBars);
+
+  // Timeline fills in act 3
+  const tlObs = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if(e.isIntersecting){
+        document.querySelectorAll('.tl-fill').forEach(f=>f.classList.add('go'));
+      }
+    });
+  },{threshold:.3});
+  const costPanel = document.querySelector('.cost-panel');
+  if(costPanel) tlObs.observe(costPanel);
+});
+/* ═══════════════════════════════════════════════════════════════
+   ACCESS REQUEST FORM — secure submission handler
+   ───────────────────────────────────────────────────────────────
+   Wires together MMSecurity rate-limiting and validation for the
+   "Request Access" form in the closing section.
+═══════════════════════════════════════════════════════════════ */
+(function initAccessForm() {
+
+  // Schema — allowlist approach; any field not listed is rejected
+  const ACCESS_SCHEMA = {
+    email: {
+      type:     'email',
+      required: true,
+      // maxLen enforced by validateField for type:'email' (254 chars)
+    },
+  };
+
+  const emailEl    = document.getElementById('access-email');
+  const submitEl   = document.getElementById('access-submit');
+  const feedbackEl = document.getElementById('access-feedback');
+
+  if (!emailEl || !submitEl || !feedbackEl) return;
+
+  // Inline validation on blur (UX: show errors before submit)
+  emailEl.addEventListener('blur', function() {
+    const result = MMSecurity.validateField(this.value, ACCESS_SCHEMA.email);
+    if (!result.ok) {
+      this.style.borderColor = 'rgba(176,72,56,.6)';
+      feedbackEl.textContent = result.error;
+      feedbackEl.style.color = '#b04838';
+    } else {
+      this.style.borderColor = 'rgba(196,160,80,.4)';
+      feedbackEl.textContent = '';
+    }
+  });
+
+  // Clear error highlight on focus
+  emailEl.addEventListener('focus', function() {
+    this.style.borderColor = 'rgba(196,160,80,.4)';
+  });
+
+  submitEl.addEventListener('click', function handleSubmit() {
+
+    // ── Step 1: Rate limit check ────────────────────────────────
+    // Client-side token bucket. Server MUST also enforce limits.
+    const rl = MMSecurity.checkRateLimit('access_request');
+    if (!rl.allowed) {
+      MMSecurity.enforceRateLimit(submitEl, feedbackEl, rl.retryAfterSeconds);
+      return;
+    }
+
+    // ── Step 2: Schema-based validation & sanitization ──────────
+    // validatePayload returns sanitized values in result.clean.
+    // Only fields in ACCESS_SCHEMA are accepted (unexpected fields rejected).
+    const payload = { email: emailEl.value };
+    const result  = MMSecurity.validatePayload(payload, ACCESS_SCHEMA);
+
+    if (!result.ok) {
+      emailEl.style.borderColor = 'rgba(176,72,56,.6)';
+      feedbackEl.textContent    = Object.values(result.errors)[0] || 'Please correct the errors above.';
+      feedbackEl.style.color    = '#b04838';
+      return;
+    }
+
+    // ── Step 3: Submit (proxy-only pattern) ─────────────────────
+    // result.clean.email is now HTML-encoded and validated.
+    // When you have a backend, replace the block below:
+    //
+    //   fetch('/api/access-request', {
+    //     method: 'POST',
+    //     headers: { 'Content-Type': 'application/json' },
+    //     // NEVER add Authorization header here — key lives on server only
+    //     body: JSON.stringify({ email: result.clean.email }),
+    //   })
+    //   .then(r => r.json())
+    //   .then(data => {
+    //     if (data.success) { /* show success state */ }
+    //     else              { /* show server error  */ }
+    //   })
+    //   .catch(() => {
+    //     feedbackEl.textContent = 'Connection error. Please try again.';
+    //   });
+
+    // ── Placeholder success state (no backend yet) ───────────────
+    submitEl.disabled          = true;
+    emailEl.disabled           = true;
+    emailEl.style.borderColor  = 'rgba(100,168,100,.4)';
+    feedbackEl.style.color     = '#6aa868';
+    // Use safeText — never innerHTML — even for our own strings
+    MMSecurity.safeText(feedbackEl, '✓ Request received. We\'ll be in touch.');
+  });
+
+})();
+</script>
